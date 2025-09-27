@@ -1,33 +1,190 @@
-require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { createClient } = require('@supabase/supabase-js');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+require('dotenv').config();
 
 const app = express();
-app.use(cors());
-app.use(express.json());
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+// Security middleware
+app.use(helmet({
+  crossOriginEmbedderPolicy: false,
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https:"],
+    },
+  },
+}));
 
+// CORS configuration
+app.use(cors({
+  origin: [
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'https://smile-t-continental.vercel.app',
+    'https://your-frontend-domain.com'
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
-app.get('/', (req, res) => {
-  res.send('Hotel Management API is running');
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  message: {
+    success: false,
+    message: 'Too many requests from this IP, please try again later.'
+  }
+});
+app.use(limiter);
+
+// Body parsing middleware
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Request logging middleware
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path} - IP: ${req.ip}`);
+  next();
 });
 
-// API routes
-app.use('/rooms', require('./routes/rooms'));
-app.use('/bookings', require('./routes/bookings'));
-app.use('/staff', require('./routes/staff'));
-app.use('/drinks', require('./routes/drinks'));
-app.use('/transactions', require('./routes/transactions'));
-app.use('/analytics', require('./routes/analytics'));
-app.use('/reports', require('./routes/reports'));
-app.use('/flutterwave', require('./routes/flutterwave'));
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Smile-T Continental Backend API is running',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
 
+// API Routes
+try {
+  // Authentication routes
+  app.use('/auth', require('./routes/auth'));
+  
+  // Staff management routes
+  app.use('/staff', require('./routes/staff'));
+  
+  // Room management routes (old individual room system)
+  app.use('/rooms', require('./routes/rooms'));
+  
+  // Room inventory routes (new room type inventory system)
+  app.use('/room-inventory', require('./routes/room-inventory'));
+  
+  // Booking routes
+  app.use('/bookings', require('./routes/bookings'));
+  
+  // Drinks management routes
+  app.use('/drinks', require('./routes/drinks'));
+  
+  // Bar sales routes
+  app.use('/bar-sales', require('./routes/bar-sales'));
+  
+  // Analytics and reports routes
+  app.use('/analytics', require('./routes/analytics'));
+  app.use('/reports', require('./routes/reports'));
+  
+  // Payment routes
+  app.use('/payments', require('./routes/flutterwave'));
+  
+  console.log(' All routes loaded successfully');
+} catch (error) {
+  console.error(' Error loading routes:', error.message);
+}
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Error:', err);
+  
+  // Handle different types of errors
+  if (err.type === 'entity.parse.failed') {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid JSON format'
+    });
+  }
+  
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({
+      success: false,
+      message: 'File too large'
+    });
+  }
+  
+  // Default error response
+  res.status(err.status || 500).json({
+    success: false,
+    message: err.message || 'Internal server error',
+    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+  });
+});
+
+// Handle 404 routes
+app.use('*', (req, res) => {
+  res.status(404).json({
+    success: false,
+    message: `Route ${req.method} ${req.originalUrl} not found`,
+    availableRoutes: [
+      'GET /health',
+      'POST /api/auth/login',
+      'GET /api/staff',
+      'GET /api/rooms',
+      'GET /api/room-inventory',
+      'GET /api/bookings',
+      'GET /api/drinks',
+      'GET /api/analytics',
+      'POST /api/payments/initiate'
+    ]
+  });
+});
+
+// Graceful shutdown handling
+process.on('SIGTERM', () => {
+  console.log('SIGTERM signal received: closing HTTP server');
+  server.close(() => {
+    console.log('HTTP server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT signal received: closing HTTP server');
+  server.close(() => {
+    console.log('HTTP server closed');
+    process.exit(0);
+  });
+});
+
+// Start server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`Backend server running on port ${PORT}`);
+const server = app.listen(PORT, () => {
+  console.log('===============================================');
+  console.log(`Smile-T Continental Backend Server Started`);
+  console.log(`Server running on port ${PORT}`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`Started at: ${new Date().toISOString()}`);
+  console.log('===============================================');
+  
+  // Log available endpoints
+  console.log('\n Available API Endpoints:');
+  console.log('  Health Check: GET /health');
+  console.log('  Authentication: POST /api/auth/login');
+  console.log('  Staff: GET|POST|PUT|DELETE /api/staff');
+  console.log('  Rooms (Old): GET|POST|PUT|DELETE /api/rooms');
+  console.log('  Room Inventory (New): GET|POST|PUT|DELETE /api/room-inventory');
+  console.log('  Bookings: GET|POST|PUT|DELETE /api/bookings');
+  console.log('  Drinks: GET|POST|PUT|DELETE /api/drinks');
+  console.log('  Analytics: GET /api/analytics');
+  console.log('  Reports: GET /api/reports');
+  console.log('  Payments: POST /api/payments/initiate');
+  console.log('===============================================\n');
 });
+
+// Export app for testing
+module.exports = app;

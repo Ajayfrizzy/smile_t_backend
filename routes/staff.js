@@ -69,36 +69,121 @@ router.post('/login', async (req, res) => {
 
 // GET all staff (superadmin only)
 router.get('/', requireRole(['superadmin']), async (req, res) => {
-  const { data, error } = await supabase.from('staff').select('*');
-  if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
+  try {
+    const { data, error } = await supabase.from('staff').select('*');
+    if (error) {
+      return res.status(500).json({ 
+        success: false, 
+        message: error.message 
+      });
+    }
+    res.json({ 
+      success: true, 
+      data: data || [],
+      message: 'Staff retrieved successfully'
+    });
+  } catch (error) {
+    console.error('Get staff error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Internal server error' 
+    });
+  }
 });
 
 // POST create staff (superadmin only)
 router.post('/', (req, res, next) => { console.log(`[${new Date().toISOString()}] Staff created:`, req.body); next(); }, requireRole(['superadmin']), async (req, res) => {
-  const { name, staff_id, password, role } = req.body;
-  const { data, error } = await supabase.from('staff').insert([
-    { name, staff_id, password, role, is_active: true }
-  ]);
-  if (error) return res.status(500).json({ error: error.message });
-  res.status(201).json(data);
+  try {
+    const { name, staff_id, password, role } = req.body;
+    
+    // Validate required fields
+    if (!name || !staff_id || !password || !role) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name, staff_id, password, and role are required'
+      });
+    }
+
+    const { data, error } = await supabase.from('staff').insert([
+      { name, staff_id, password, role, is_active: true }
+    ]).select();
+    
+    if (error) {
+      return res.status(500).json({ 
+        success: false, 
+        message: error.message 
+      });
+    }
+    
+    res.status(201).json({
+      success: true,
+      data: data[0],
+      message: 'Staff created successfully'
+    });
+  } catch (error) {
+    console.error('Create staff error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Internal server error' 
+    });
+  }
 });
 
 // PUT update staff (superadmin only)
 router.put('/:id', (req, res, next) => { console.log(`[${new Date().toISOString()}] Staff updated:`, req.body); next(); }, requireRole(['superadmin']), async (req, res) => {
-  const { id } = req.params;
-  const updates = req.body;
-  const { data, error } = await supabase.from('staff').update(updates).eq('id', id);
-  if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+    
+    const { data, error } = await supabase.from('staff').update(updates).eq('id', id).select();
+    
+    if (error) {
+      return res.status(500).json({ 
+        success: false, 
+        message: error.message 
+      });
+    }
+    
+    res.json({
+      success: true,
+      data: data[0],
+      message: 'Staff updated successfully'
+    });
+  } catch (error) {
+    console.error('Update staff error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Internal server error' 
+    });
+  }
 });
 
 // DELETE staff (superadmin only)
 router.delete('/:id', (req, res, next) => { console.log(`[${new Date().toISOString()}] Staff deleted:`, req.params); next(); }, requireRole(['superadmin']), async (req, res) => {
-  const { id } = req.params;
-  const { data, error } = await supabase.from('staff').update({ is_active: false }).eq('id', id);
-  if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
+  try {
+    const { id } = req.params;
+    
+    const { data, error } = await supabase.from('staff').update({ is_active: false }).eq('id', id).select();
+    
+    if (error) {
+      return res.status(500).json({ 
+        success: false, 
+        message: error.message 
+      });
+    }
+    
+    res.json({
+      success: true,
+      data: data[0],
+      message: 'Staff deleted successfully'
+    });
+  } catch (error) {
+    console.error('Delete staff error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Internal server error' 
+    });
+  }
 });
 
 module.exports = router;

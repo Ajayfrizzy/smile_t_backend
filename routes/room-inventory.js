@@ -52,6 +52,227 @@ const ROOM_TYPES = {
   },
 };
 
+// GET available rooms for public (no auth required - FAST!)
+router.get('/available', async (req, res) => {
+  try {
+    // Set cache headers for better performance
+    res.set({
+      'Cache-Control': 'public, max-age=300', // Cache for 5 minutes
+      'ETag': Date.now().toString()
+    });
+
+    const { data, error } = await supabase
+      .from('room_inventory')
+      .select('room_type_id, available_rooms, total_rooms, status')
+      .eq('is_active', true)
+      .eq('status', 'Available')
+      .gt('available_rooms', 0);
+    
+    if (error) {
+      return res.status(500).json({ 
+        success: false, 
+        message: error.message 
+      });
+    }
+
+    // Pre-build the response with room type details (faster than mapping)
+    const availableRooms = (data || []).map(inventory => {
+      const roomType = ROOM_TYPES[inventory.room_type_id];
+      return {
+        id: inventory.room_type_id, // Use room_type_id as id for booking form
+        room_type: roomType?.room_type || 'Unknown',
+        price_per_night: roomType?.price_per_night || 0,
+        max_occupancy: roomType?.max_occupancy || 1,
+        amenities: roomType?.amenities || '',
+        description: roomType?.description || '',
+        image: roomType?.image || '',
+        available_rooms: inventory.available_rooms,
+        total_rooms: inventory.total_rooms,
+        status: inventory.status,
+        // Additional fields for compatibility
+        name: roomType?.room_type || 'Unknown',
+        type: roomType?.room_type || 'Unknown',
+        price: roomType?.price_per_night || 0
+      };
+    });
+    
+    res.json({
+      success: true,
+      data: availableRooms,
+      message: 'Available rooms retrieved successfully'
+    });
+  } catch (error) {
+    console.error('❌ Get available rooms error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Internal server error',
+      error: error.message 
+    });
+  }
+});
+
+// DEBUG: Add sample room inventory data (temporary)
+router.get('/debug/add-sample', async (req, res) => {
+  try {
+    console.log('🔧 DEBUG: Adding sample room inventory data...');
+    
+    const sampleRooms = [
+      {
+        room_type_id: 'classic-single',
+        available_rooms: 5,
+        total_rooms: 10,
+        status: 'Available',
+        is_active: true
+      },
+      {
+        room_type_id: 'deluxe',
+        available_rooms: 3,
+        total_rooms: 8,
+        status: 'Available',
+        is_active: true
+      },
+      {
+        room_type_id: 'deluxe-large',
+        available_rooms: 2,
+        total_rooms: 5,
+        status: 'Available',
+        is_active: true
+      }
+    ];
+
+    // First, try to check if table exists and what data is there
+    const { data: existingData, error: checkError } = await supabase
+      .from('room_inventory')
+      .select('*')
+      .limit(1);
+      
+    console.log('🔍 DEBUG: Existing data check:', existingData);
+    console.log('🔍 DEBUG: Check error:', checkError);
+
+    // If table doesn't exist, return helpful error
+    if (checkError && checkError.message.includes('does not exist')) {
+      return res.status(500).json({ 
+        success: false, 
+        message: 'room_inventory table does not exist. Please create the table first.',
+        error: checkError.message
+      });
+    }
+
+    // Try simple insert first
+    const { data, error } = await supabase
+      .from('room_inventory')
+      .insert(sampleRooms)
+      .select();
+
+    if (error) {
+      console.error('❌ Error adding sample data:', error);
+      return res.status(500).json({ 
+        success: false, 
+        message: error.message 
+      });
+    }
+
+    console.log('✅ Sample data added:', data);
+    res.json({
+      success: true,
+      data: data,
+      message: 'Sample room inventory added successfully'
+    });
+  } catch (error) {
+    console.error('❌ Error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Internal server error',
+      error: error.message 
+    });
+  }
+});
+
+// DEBUG: Create room_inventory table if it doesn't exist
+router.get('/debug/create-table', async (req, res) => {
+  try {
+    console.log('🔧 DEBUG: Attempting to create room_inventory table...');
+    
+    // This is a basic check - in production you'd use migrations
+    const { data, error } = await supabase
+      .from('room_inventory')
+      .select('*')
+      .limit(1);
+    
+    if (error && error.message.includes('does not exist')) {
+      return res.json({
+        success: false,
+        message: 'Table does not exist. Please create the room_inventory table in Supabase with these columns: id (int8, primary key), room_type_id (text), available_rooms (int4), total_rooms (int4), status (text), is_active (bool), created_at (timestamptz), updated_at (timestamptz)',
+        sql: `
+CREATE TABLE room_inventory (
+  id BIGSERIAL PRIMARY KEY,
+  room_type_id TEXT NOT NULL UNIQUE,
+  available_rooms INTEGER NOT NULL DEFAULT 0,
+  total_rooms INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'Available',
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);`
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: 'Table exists and is accessible',
+      data: data
+    });
+  } catch (error) {
+    console.error('❌ Create table error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Error checking table',
+      error: error.message 
+    });
+  }
+});
+
+// DEBUG: Get all room inventory data (no auth for debugging)
+router.get('/debug/all', async (req, res) => {
+  try {
+    console.log('🔍 DEBUG: Fetching all room inventory data...');
+    
+    const { data, error } = await supabase
+      .from('room_inventory')
+      .select('*');
+    
+    console.log('🔍 DEBUG: Raw data from database:', data);
+    console.log('🔍 DEBUG: Error (if any):', error);
+    
+    if (error) {
+      return res.status(500).json({ 
+        success: false, 
+        message: error.message 
+      });
+    }
+    
+    // Enhance data with room type details
+    const enhancedData = (data || []).map(inventory => ({
+      ...inventory,
+      room_type_details: ROOM_TYPES[inventory.room_type_id] || null
+    }));
+    
+    res.json({
+      success: true,
+      data: enhancedData,
+      message: 'All room inventory retrieved successfully (debug mode)',
+      count: enhancedData.length
+    });
+  } catch (error) {
+    console.error('❌ Debug all rooms error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Internal server error',
+      error: error.message 
+    });
+  }
+});
+
 // GET all room inventory (all staff can view)
 router.get('/', requireRole(['superadmin', 'supervisor', 'receptionist']), async (req, res) => {
   try {

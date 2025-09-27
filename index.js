@@ -25,7 +25,8 @@ app.use(cors({
     'http://localhost:3000',
     'http://localhost:5173',
     'https://smile-t-continental.vercel.app',
-    'https://your-frontend-domain.com'
+    'https://your-frontend-domain.com',
+    null  // Allow file:// origins for debugging
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -71,10 +72,7 @@ try {
   // Staff management routes
   app.use('/staff', require('./routes/staff'));
   
-  // Room management routes (old individual room system)
-  app.use('/rooms', require('./routes/rooms'));
-  
-  // Room inventory routes (new room type inventory system)
+  // Room inventory routes (room type inventory system)
   app.use('/room-inventory', require('./routes/room-inventory'));
   
   // Booking routes
@@ -134,7 +132,6 @@ app.use('*', (req, res) => {
       'GET /health',
       'POST /api/auth/login',
       'GET /api/staff',
-      'GET /api/rooms',
       'GET /api/room-inventory',
       'GET /api/bookings',
       'GET /api/drinks',
@@ -176,8 +173,7 @@ const server = app.listen(PORT, () => {
   console.log('  Health Check: GET /health');
   console.log('  Authentication: POST /api/auth/login');
   console.log('  Staff: GET|POST|PUT|DELETE /api/staff');
-  console.log('  Rooms (Old): GET|POST|PUT|DELETE /api/rooms');
-  console.log('  Room Inventory (New): GET|POST|PUT|DELETE /api/room-inventory');
+  console.log('  Room Inventory: GET|POST|PUT|DELETE /api/room-inventory');
   console.log('  Bookings: GET|POST|PUT|DELETE /api/bookings');
   console.log('  Drinks: GET|POST|PUT|DELETE /api/drinks');
   console.log('  Analytics: GET /api/analytics');

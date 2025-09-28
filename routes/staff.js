@@ -104,8 +104,11 @@ router.post('/', (req, res, next) => { console.log(`[${new Date().toISOString()}
       });
     }
 
+    // Hash the password before storing
+    const hashedPassword = await bcrypt.hash(password, 10);
+
     const { data, error } = await supabase.from('staff').insert([
-      { name, staff_id, password, role, is_active: true }
+      { name, staff_id, password: hashedPassword, role, is_active: true }
     ]).select();
     
     if (error) {

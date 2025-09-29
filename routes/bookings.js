@@ -200,6 +200,11 @@ router.post('/', (req, res, next) => { console.log(`[${new Date().toISOString()}
     reference
   } = req.body;
 
+  // Validate required fields
+  if (!room_id || !guest_name || !guest_email || !guest_phone || !check_in || !check_out) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
   // Use same room type definitions as public booking (with UUID mappings)
   const ROOM_TYPES = {
     'classic-single': {
@@ -242,31 +247,60 @@ router.post('/', (req, res, next) => { console.log(`[${new Date().toISOString()}
   
   const nights = (new Date(check_out) - new Date(check_in)) / (1000 * 60 * 60 * 24);
   if (nights <= 0) return res.status(400).json({ error: 'Invalid date range' });
+  
   const base_total = Number((roomPrice * nights).toFixed(2));
   const transaction_fee = Number((base_total * 0.02).toFixed(2));
   const total_amount = base_total + transaction_fee;
 
-  const { data, error } = await supabase.from('bookings').insert([
-    {
-      room_id: roomUuid, // Use UUID for database compatibility
-      guest_name,
-      guest_email,
-      guest_phone,
-      check_in,
-      check_out,
-      guests,
-      payment_status,
-      transaction_ref,
-      status,
-      reference,
-      base_total,
-      transaction_fee,
-      total_amount
-    }
-  ]);
-  if (error) return res.status(500).json({ error: error.message });
+  let data, error;
+  try {
+    const result = await supabase.from('bookings').insert([
+      {
+        room_id: roomUuid, // Use UUID for database compatibility
+        guest_name,
+        guest_email,
+        guest_phone,
+        check_in,
+        check_out,
+        guests: guests || 1,
+        payment_status: payment_status || 'pending',
+        transaction_ref: transaction_ref || `BK-${Date.now()}`,
+        status: status || 'confirmed',
+        base_total,
+        transaction_fee,
+        total_amount
+      }
+    ]).select();
+    
+    data = result.data;
+    error = result.error;
+  } catch (insertError) {
+    console.error('Staff booking creation error:', insertError);
+    error = {
+      message: 'Database connection failed',
+      details: insertError.message,
+      code: 'CONNECTION_ERROR'
+    };
+  }
+  
+  if (error) {
+    console.error('Staff booking creation error:', error);
+    return res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      message: 'Failed to create booking'
+    });
+  }
+  
   // await sendBookingConfirmationEmail(data[0]); // Send email after successful booking
-  res.status(201).json({ booking: data[0], base_total, transaction_fee, total_amount });
+  res.status(201).json({ 
+    success: true,
+    booking: data[0], 
+    base_total, 
+    transaction_fee, 
+    total_amount,
+    message: 'Booking created successfully'
+  });
 });
 
 

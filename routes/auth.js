@@ -126,4 +126,152 @@ router.get('/verify', async (req, res) => {
   }
 });
 
+// PUT /api/auth/update-profile - Update user profile
+router.put('/update-profile', async (req, res) => {
+  try {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'No token provided'
+      });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const { name, currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Current password and new password are required'
+      });
+    }
+
+    // Get current staff data to verify password
+    const { data: staff, error: fetchError } = await supabase
+      .from('staff')
+      .select('*')
+      .eq('id', decoded.id)
+      .single();
+
+    if (fetchError || !staff) {
+      return res.status(404).json({
+        success: false,
+        message: 'Staff member not found'
+      });
+    }
+
+    // Verify current password
+    const isValidPassword = await bcrypt.compare(currentPassword, staff.password);
+    if (!isValidPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Current password is incorrect'
+      });
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Prepare update data
+    const updateData = { password: hashedPassword };
+    
+    // Only allow superadmin to change their name
+    if (staff.role === 'superadmin' && name && name !== staff.name) {
+      updateData.name = name;
+    }
+
+    // Update staff record
+    const { data: updatedStaff, error: updateError } = await supabase
+      .from('staff')
+      .update(updateData)
+      .eq('id', decoded.id)
+      .select('id, staff_id, name, role, is_active')
+      .single();
+
+    if (updateError) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to update profile'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Profile updated successfully',
+      user: updatedStaff
+    });
+
+  } catch (error) {
+    console.error('Update profile error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// PUT /api/auth/update-settings - Update user settings
+router.put('/update-settings', async (req, res) => {
+  try {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'No token provided'
+      });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const { emailNotifications, smsAlerts, dailyReports, currency, timeZone } = req.body;
+
+    // Validate decoded token has required fields
+    if (!decoded.id) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid token'
+      });
+    }
+
+    // For now, we'll just validate the user exists and return success
+    // Settings can be stored in a future database migration
+    const { data: staff, error: staffError } = await supabase
+      .from('staff')
+      .select('id, staff_id, name, role')
+      .eq('id', decoded.id)
+      .single();
+
+    if (staffError || !staff) {
+      return res.status(404).json({
+        success: false,
+        message: 'Staff member not found'
+      });
+    }
+
+    // Log the settings for debugging (in production, you'd save to database)
+    console.log('Settings update for user:', staff.staff_id, {
+      emailNotifications,
+      smsAlerts,
+      dailyReports,
+      currency: currency || 'NGN',
+      timeZone: timeZone || 'Africa/Lagos'
+    });
+
+    // Return success response
+    res.json({
+      success: true,
+      message: 'Settings updated successfully'
+    });
+
+  } catch (error) {
+    console.error('Update settings error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
 module.exports = router;

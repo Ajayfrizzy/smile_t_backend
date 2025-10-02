@@ -8,7 +8,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// GET all bar sales (barmen and supervisors can view)
+// GET all bar sales (super admin, barmen and supervisors can view)
 router.get('/', requireRole(['superadmin', 'supervisor', 'barmen']), async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -47,17 +47,27 @@ router.get('/', requireRole(['superadmin', 'supervisor', 'barmen']), async (req,
   }
 });
 
-// POST add new bar sale (barmen only)
+// POST add new bar sale (super admin and barmen only)
 router.post('/', requireRole(['superadmin', 'barmen']), async (req, res) => {
   try {
-    const { drink_id, quantity, customer_name, payment_method } = req.body;
-    const staff_id = req.user.id;
+    const { drink_id, quantity } = req.body;
+    
+    // Extract staff ID - handle different possible formats
+    let staffIdNumber;
+    if (req.user.staff_id) {
+      // Extract numbers from staff_id (e.g., "SA001" -> "1") 
+      staffIdNumber = parseInt(req.user.staff_id.replace(/\D/g, '') || '1');
+    } else if (req.user.id) {
+      staffIdNumber = parseInt(req.user.id);
+    } else {
+      staffIdNumber = 1; // Default fallback
+    }
     
     // Validate required fields
-    if (!drink_id || !quantity) {
+    if (!drink_id || !quantity || isNaN(parseInt(drink_id)) || isNaN(parseInt(quantity))) {
       return res.status(400).json({
         success: false,
-        message: 'Drink ID and quantity are required'
+        message: 'Valid drink ID and quantity are required'
       });
     }
 
@@ -90,13 +100,10 @@ router.post('/', requireRole(['superadmin', 'barmen']), async (req, res) => {
       .from('bar_sales')
       .insert([
         {
-          drink_id,
-          staff_id,
+          drink_id: parseInt(drink_id),
+          staff_id: parseInt(req.user.staff_id.replace(/\D/g, '') || ''), // Extract number from staff_id
           quantity: parseInt(quantity),
-          unit_price: drink.price,
-          total_amount,
-          customer_name,
-          payment_method: payment_method || 'cash'
+          drink_name: drink.drink_name // Add required drink_name field
         }
       ])
       .select()
@@ -130,6 +137,67 @@ router.post('/', requireRole(['superadmin', 'barmen']), async (req, res) => {
 
   } catch (error) {
     console.error('Create bar sale error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Internal server error' 
+    });
+  }
+});
+
+// DELETE bar sale (superadmin only)
+router.delete('/:id', requireRole(['superadmin']), async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // First check if sale exists
+    const { data: existingSale, error: fetchError } = await supabase
+      .from('bar_sales')
+      .select('*')
+      .eq('id', id)
+      .single();
+    
+    if (fetchError || !existingSale) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Sale not found' 
+      });
+    }
+    
+    // Delete the sale
+    const { error: deleteError } = await supabase
+      .from('bar_sales')
+      .delete()
+      .eq('id', id);
+    
+    if (deleteError) {
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Failed to delete sale' 
+      });
+    }
+    
+    // Restore stock (add back the quantity that was sold)
+    if (existingSale.drink_id && existingSale.quantity) {
+      const { error: updateError } = await supabase
+        .from('drinks')
+        .update({ 
+          stock_quantity: supabase.sql`stock_quantity + ${existingSale.quantity}`
+        })
+        .eq('id', existingSale.drink_id);
+
+      if (updateError) {
+        console.error('Error restoring stock:', updateError);
+        // Note: Sale is deleted but stock not restored - log for manual correction
+      }
+    }
+    
+    res.json({ 
+      success: true, 
+      message: 'Sale deleted successfully' 
+    });
+    
+  } catch (error) {
+    console.error('Delete sale error:', error);
     res.status(500).json({ 
       success: false, 
       message: 'Internal server error' 

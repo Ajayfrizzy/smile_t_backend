@@ -11,31 +11,75 @@ const supabase = createClient(
 // GET all bar sales (super admin, barmen and supervisors can view)
 router.get('/', requireRole(['superadmin', 'supervisor', 'barmen']), async (req, res) => {
   try {
+    // First try to get basic bar sales data
     const { data, error } = await supabase
       .from('bar_sales')
-      .select(`
-        *,
-        drinks (
-          drink_name,
-          price
-        ),
-        staff (
-          name,
-          staff_id
-        )
-      `)
-      .order('created_at', { ascending: false });
+      .select('*')
+      .order('date', { ascending: false });
     
     if (error) {
+      console.error('Bar sales query error:', error);
       return res.status(500).json({ 
         success: false, 
         message: error.message 
       });
     }
     
+    // Then try to get related data separately to avoid join issues
+    let enrichedData = data || [];
+    
+    if (enrichedData.length > 0) {
+      try {
+        // Get drinks data
+        const { data: drinksData } = await supabase
+          .from('drinks')
+          .select('id, drink_name, price');
+        
+        // Get staff data  
+        const { data: staffData } = await supabase
+          .from('staff')
+          .select('id, name, staff_id');
+        
+        // Enrich the bar sales data to match frontend expectations
+        enrichedData = enrichedData.map(sale => {
+          const drink = drinksData?.find(d => d.id === sale.drink_id);
+          const staff = staffData?.find(s => s.id === sale.staff_id);
+          
+          return {
+            ...sale,
+            // Frontend expects these exact field names
+            created_at: sale.date, // Map 'date' to 'created_at'
+            unit_price: drink?.price || 0,
+            total_amount: sale.amount || 0,
+            // Nested objects as expected by frontend
+            drinks: drink ? {
+              id: drink.id,
+              drink_name: drink.drink_name,
+              price: drink.price,
+              category: drink.category
+            } : null,
+            staff: staff ? {
+              id: staff.id,
+              name: staff.name,
+              staff_id: staff.staff_id,
+              role: staff.role
+            } : null,
+            // Keep original fields for backwards compatibility
+            drink_name: drink?.drink_name || sale.drink_name,
+            drink_price: drink?.price,
+            staff_name: staff?.name,
+            staff_code: staff?.staff_id
+          };
+        });
+      } catch (enrichError) {
+        console.error('Error enriching bar sales data:', enrichError);
+        // Continue with basic data if enrichment fails
+      }
+    }
+    
     res.json({
       success: true,
-      data: data || [],
+      data: enrichedData,
       message: 'Bar sales retrieved successfully'
     });
   } catch (error) {
@@ -53,14 +97,12 @@ router.post('/', requireRole(['superadmin', 'barmen']), async (req, res) => {
     const { drink_id, quantity } = req.body;
     
     // Extract staff ID - handle different possible formats
-    let staffIdNumber;
-    if (req.user.staff_id) {
-      // Extract numbers from staff_id (e.g., "SA001" -> "1") 
-      staffIdNumber = parseInt(req.user.staff_id.replace(/\D/g, '') || '1');
-    } else if (req.user.id) {
-      staffIdNumber = parseInt(req.user.id);
-    } else {
-      staffIdNumber = 1; // Default fallback
+    // Ensure we have authenticated user
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
     }
     
     // Validate required fields
@@ -101,8 +143,9 @@ router.post('/', requireRole(['superadmin', 'barmen']), async (req, res) => {
       .insert([
         {
           drink_id: parseInt(drink_id),
-          staff_id: parseInt(req.user.staff_id.replace(/\D/g, '') || ''), // Extract number from staff_id
+          staff_id: req.user.id, // Use the actual user ID from the database
           quantity: parseInt(quantity),
+          amount: total_amount, // Add the calculated amount field
           drink_name: drink.drink_name // Add required drink_name field
         }
       ])
@@ -178,16 +221,27 @@ router.delete('/:id', requireRole(['superadmin']), async (req, res) => {
     
     // Restore stock (add back the quantity that was sold)
     if (existingSale.drink_id && existingSale.quantity) {
-      const { error: updateError } = await supabase
+      // First get the current stock quantity
+      const { data: drinkData, error: getDrinkError } = await supabase
         .from('drinks')
-        .update({ 
-          stock_quantity: supabase.sql`stock_quantity + ${existingSale.quantity}`
-        })
-        .eq('id', existingSale.drink_id);
+        .select('stock_quantity')
+        .eq('id', existingSale.drink_id)
+        .single();
+      
+      if (!getDrinkError && drinkData) {
+        const newStockQuantity = (drinkData.stock_quantity || 0) + existingSale.quantity;
+        
+        const { error: updateError } = await supabase
+          .from('drinks')
+          .update({ 
+            stock_quantity: newStockQuantity
+          })
+          .eq('id', existingSale.drink_id);
 
-      if (updateError) {
-        console.error('Error restoring stock:', updateError);
-        // Note: Sale is deleted but stock not restored - log for manual correction
+        if (updateError) {
+          console.error('Error restoring stock:', updateError);
+          // Note: Sale is deleted but stock not restored - log for manual correction
+        }
       }
     }
     

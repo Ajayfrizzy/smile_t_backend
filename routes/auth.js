@@ -274,4 +274,98 @@ router.put('/update-settings', async (req, res) => {
   }
 });
 
+// POST /api/auth/change-password
+router.post('/change-password', async (req, res) => {
+  try {
+    const { current_password, new_password } = req.body;
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authorization token required'
+      });
+    }
+
+    const token = authHeader.substring(7);
+    
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const staffId = decoded.id;
+
+      if (!current_password || !new_password) {
+        return res.status(400).json({
+          success: false,
+          message: 'Current password and new password are required'
+        });
+      }
+
+      if (new_password.length < 6) {
+        return res.status(400).json({
+          success: false,
+          message: 'New password must be at least 6 characters long'
+        });
+      }
+
+      // Get current staff data
+      const { data: staff, error: fetchError } = await supabase
+        .from('staff')
+        .select('*')
+        .eq('id', staffId)
+        .single();
+
+      if (fetchError || !staff) {
+        return res.status(404).json({
+          success: false,
+          message: 'Staff member not found'
+        });
+      }
+
+      // Verify current password
+      const isCurrentPasswordValid = await bcrypt.compare(current_password, staff.password);
+      if (!isCurrentPasswordValid) {
+        return res.status(400).json({
+          success: false,
+          message: 'Current password is incorrect'
+        });
+      }
+
+      // Hash new password
+      const saltRounds = 10;
+      const hashedNewPassword = await bcrypt.hash(new_password, saltRounds);
+
+      // Update password in database
+      const { error: updateError } = await supabase
+        .from('staff')
+        .update({ password: hashedNewPassword })
+        .eq('id', staffId);
+
+      if (updateError) {
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to update password'
+        });
+      }
+
+      res.json({
+        success: true,
+        message: 'Password changed successfully'
+      });
+
+    } catch (jwtError) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid or expired token'
+      });
+    }
+
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
 module.exports = router;

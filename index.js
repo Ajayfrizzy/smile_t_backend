@@ -88,6 +88,9 @@ try {
   app.use('/analytics', require('./routes/analytics'));
   app.use('/reports', require('./routes/reports'));
   
+  // Transactions routes
+  app.use('/transactions', require('./routes/transactions'));
+  
   // Payment routes
   app.use('/payments', require('./routes/flutterwave'));
   

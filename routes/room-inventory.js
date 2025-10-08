@@ -214,6 +214,85 @@ router.get('/check-availability', async (req, res) => {
   }
 });
 
+// GET room inventory with dynamic availability calculation (for dashboard)
+router.get('/dashboard', requireRole(['superadmin', 'supervisor', 'receptionist']), async (req, res) => {
+  try {
+    // Get room inventory
+    const { data: inventoryData, error: inventoryError } = await supabase
+      .from('room_inventory')
+      .select('*')
+      .eq('is_active', true);
+    
+    if (inventoryError) {
+      return res.status(500).json({ 
+        success: false, 
+        message: inventoryError.message 
+      });
+    }
+
+    // Room type UUIDs for booking queries
+    const ROOM_TYPE_UUIDS = {
+      'classic-single': '11111111-1111-1111-1111-111111111111',
+      'deluxe': '22222222-2222-2222-2222-222222222222', 
+      'deluxe-large': '33333333-3333-3333-3333-333333333333',
+      'business-suite': '44444444-4444-4444-4444-444444444444',
+      'executive-suite': '55555555-5555-5555-5555-555555555555'
+    };
+
+    // Calculate real-time availability for each room type
+    const enhancedData = await Promise.all((inventoryData || []).map(async (inventory) => {
+      const roomUuid = ROOM_TYPE_UUIDS[inventory.room_type_id];
+      
+      if (roomUuid) {
+        // Get current active bookings for this room type
+        const { data: activeBookings, error: bookingsError } = await supabase
+          .from('bookings')
+          .select('*')
+          .eq('room_id', roomUuid)
+          .not('status', 'eq', 'cancelled')
+          .gte('check_out', new Date().toISOString().split('T')[0]); // Future or current bookings
+
+        if (!bookingsError) {
+          const bookedRooms = activeBookings ? activeBookings.length : 0;
+          const dynamicAvailableRooms = Math.max(0, inventory.total_rooms - bookedRooms);
+          
+          // Debug logging
+          console.log(`Dynamic availability for ${inventory.room_type_id}:`);
+          console.log(`- Total rooms: ${inventory.total_rooms}`);  
+          console.log(`- Active bookings: ${bookedRooms}`);
+          console.log(`- Available rooms: ${dynamicAvailableRooms}`);
+          
+          return {
+            ...inventory,
+            available_rooms: dynamicAvailableRooms, // Override with dynamic calculation
+            booked_rooms: bookedRooms,
+            room_type_details: ROOM_TYPES[inventory.room_type_id] || null
+          };
+        }
+      }
+      
+      // Fallback to inventory data
+      return {
+        ...inventory,
+        booked_rooms: inventory.total_rooms - inventory.available_rooms,
+        room_type_details: ROOM_TYPES[inventory.room_type_id] || null
+      };
+    }));
+    
+    res.json({
+      success: true,
+      data: enhancedData,
+      message: 'Room inventory with dynamic availability retrieved successfully'
+    });
+  } catch (error) {
+    console.error('Get dashboard room inventory error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Internal server error' 
+    });
+  }
+});
+
 // GET all room inventory (all staff can view)
 router.get('/', requireRole(['superadmin', 'supervisor', 'receptionist']), async (req, res) => {
   try {

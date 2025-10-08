@@ -29,7 +29,11 @@ router.post('/login', async (req, res) => {
       .single();
 
     if (error || !staff) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+      return res.status(401).json({ 
+        error: 'Staff ID not found', 
+        message: 'Staff ID not found or account is inactive',
+        type: 'INVALID_STAFF_ID'
+      });
     }
 
     // Compare password (assuming passwords are hashed in database)
@@ -40,7 +44,11 @@ router.post('/login', async (req, res) => {
     });
 
     if (!isValidPassword) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+      return res.status(401).json({ 
+        error: 'Incorrect password', 
+        message: 'Password is incorrect',
+        type: 'INVALID_PASSWORD'
+      });
     }
 
     // Generate JWT token
@@ -166,7 +174,7 @@ router.delete('/:id', (req, res, next) => { console.log(`[${new Date().toISOStri
   try {
     const { id } = req.params;
     
-    const { data, error } = await supabase.from('staff').update({ is_active: false }).eq('id', id).select();
+    const { data, error } = await supabase.from('staff').delete().eq('id', id).select();
     
     if (error) {
       return res.status(500).json({ 

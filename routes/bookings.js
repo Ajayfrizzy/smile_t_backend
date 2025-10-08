@@ -59,9 +59,75 @@ async function sendBookingConfirmationEmail(booking) {
 
 // GET all bookings (superadmin, supervisor, receptionist)
 router.get('/', requireRole(['superadmin', 'supervisor', 'receptionist']), async (req, res) => {
-  const { data, error } = await supabase.from('bookings').select('*');
-  if (error) return res.status(500).json({ success: false, message: error.message });
-  res.json({ success: true, data: data || [] });
+  try {
+    const { data: bookings, error } = await supabase.from('bookings').select('*');
+    if (error) {
+      console.error('Bookings fetch error:', error);
+      return res.status(500).json({ success: false, message: error.message });
+    }
+
+    // Room type mappings
+    const ROOM_TYPES = {
+      '11111111-1111-1111-1111-111111111111': {
+        room_type: "Classic Single",
+        price_per_night: 24900,
+        room_type_id: 'classic-single'
+      },
+      '22222222-2222-2222-2222-222222222222': {
+        room_type: "Deluxe",
+        price_per_night: 30500,
+        room_type_id: 'deluxe'
+      },
+      '33333333-3333-3333-3333-333333333333': {
+        room_type: "Deluxe Large",
+        price_per_night: 36600,
+        room_type_id: 'deluxe-large'
+      },
+      '44444444-4444-4444-4444-444444444444': {
+        room_type: "Business Suite",
+        price_per_night: 54900,
+        room_type_id: 'business-suite'
+      },
+      '55555555-5555-5555-5555-555555555555': {
+        room_type: "Executive Suite",
+        price_per_night: 54900,
+        room_type_id: 'executive-suite'
+      }
+    };
+
+    // Enrich bookings with room type information
+    const enrichedBookings = (bookings || []).map(booking => {
+      const roomType = ROOM_TYPES[booking.room_id];
+      
+      // Determine source label based on created_by_role
+      let source_label = '👤 Manual Booking';
+      if (booking.created_by_role === 'client') {
+        source_label = '🌐 Client Booking';
+      } else if (booking.created_by_role === 'superadmin') {
+        source_label = '👑 SuperAdmin Booking';
+      } else if (booking.created_by_role === 'receptionist') {
+        source_label = '🏨 Receptionist Booking';
+      } else if (booking.payment_method === 'flutterwave') {
+        source_label = '🌐 Online Booking';
+      }
+      
+      return {
+        ...booking,
+        room_type: roomType?.room_type || 'Unknown Room',
+        room_type_id: roomType?.room_type_id,
+        price_per_night: roomType?.price_per_night,
+        // Determine booking source based on created_by_role or payment method (fallback)
+        booking_source: booking.created_by_role || (booking.payment_method === 'flutterwave' ? 'client' : 'manual'),
+        source_label: source_label,
+        created_by: booking.created_by_role || 'unknown' // For backward compatibility
+      };
+    });
+
+    res.json({ success: true, data: enrichedBookings });
+  } catch (error) {
+    console.error('Get bookings error:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
 });
 
 // POST create public booking (for customer bookings)
@@ -161,7 +227,9 @@ router.post('/public', async (req, res) => {
         status: status || 'pending',
         base_total,
         transaction_fee,
-        total_amount
+        total_amount,
+        payment_method: 'flutterwave', // Online bookings use Flutterwave
+        created_by_role: 'client' // Online bookings are created by clients
       }
     ]).select();
     
@@ -248,8 +316,9 @@ router.post('/', (req, res, next) => { console.log(`[${new Date().toISOString()}
   const nights = (new Date(check_out) - new Date(check_in)) / (1000 * 60 * 60 * 24);
   if (nights <= 0) return res.status(400).json({ error: 'Invalid date range' });
   
-  // Declare roomInventory variable outside try-catch for broader scope
+  // Declare variables outside try-catch for broader scope
   let roomInventory;
+  let bookedRooms = 0;
   
   // Check room availability
   try {
@@ -273,11 +342,15 @@ router.post('/', (req, res, next) => { console.log(`[${new Date().toISOString()}
     }
 
     // Check existing bookings for the same room type and overlapping dates
+    // Booking overlap logic: new booking overlaps if:
+    // 1. New check-in is before existing check-out AND
+    // 2. New check-out is after existing check-in
     const { data: existingBookings, error: bookingsError } = await supabase
       .from('bookings')
       .select('*')
       .eq('room_id', roomUuid)
-      .or(`check_in.lte.${check_out},check_out.gte.${check_in}`)
+      .lt('check_in', check_out)
+      .gt('check_out', check_in)
       .not('status', 'eq', 'cancelled');
 
     if (bookingsError) {
@@ -288,13 +361,33 @@ router.post('/', (req, res, next) => { console.log(`[${new Date().toISOString()}
       });
     }
 
-    const bookedRooms = existingBookings ? existingBookings.length : 0;
-    const availableRooms = roomInventory.available_rooms - bookedRooms;
+    bookedRooms = existingBookings ? existingBookings.length : 0;
+    // Use total_rooms from inventory, not available_rooms (which gets updated)
+    const availableRooms = roomInventory.total_rooms - bookedRooms;
 
-    if (availableRooms <= 0) {
+    // Enhanced logging for debugging
+    console.log('=== Room Availability Check ===');
+    console.log('Room type:', room_id);
+    console.log('Check-in:', check_in);
+    console.log('Check-out:', check_out);
+    console.log('Total rooms in inventory:', roomInventory.total_rooms);
+    console.log('Currently booked rooms for these dates:', bookedRooms);
+    console.log('Available rooms (total - booked):', availableRooms);
+    console.log('Existing bookings details:', existingBookings);
+    console.log('===============================');
+
+    if (availableRooms < 1) {
       return res.status(400).json({ 
         success: false, 
-        message: 'No rooms available for the selected dates' 
+        message: `No rooms available for the selected dates. ${bookedRooms} out of ${roomInventory.total_rooms} rooms already booked.`,
+        debug: {
+          totalRooms: roomInventory.total_rooms,
+          bookedRooms,
+          calculatedAvailable: availableRooms,
+          checkIn: check_in,
+          checkOut: check_out,
+          roomType: room_id
+        }
       });
     }
   } catch (availabilityError) {
@@ -325,33 +418,19 @@ router.post('/', (req, res, next) => { console.log(`[${new Date().toISOString()}
         status: status || 'confirmed',
         base_total,
         transaction_fee,
-        total_amount
+        total_amount,
+        payment_method: 'manual', // Manual bookings don't use online payment
+        created_by_role: req.user.role // Get role from authenticated user
       }
     ]).select();
     
     data = result.data;
     error = result.error;
 
-    // If booking was successful, update room inventory
-    if (!error && data && data.length > 0 && roomInventory) {
-      const newAvailableRooms = roomInventory.available_rooms - 1;
-      const { error: updateError } = await supabase
-        .from('room_inventory')
-        .update({ 
-          available_rooms: Math.max(0, newAvailableRooms), // Ensure non-negative
-          updated_at: new Date().toISOString()
-        })
-        .eq('room_type_id', room_id)
-        .eq('is_active', true);
-
-      if (updateError) {
-        console.error('Failed to update room inventory:', updateError);
-        // Note: In production, you might want to implement transaction rollback
-      } else {
-        console.log(`Updated room inventory: ${room_id} now has ${Math.max(0, newAvailableRooms)} available rooms`);
-      }
-    } else if (!roomInventory) {
-      console.warn('roomInventory is null - skipping inventory update');
+    // Note: Room availability is now calculated dynamically based on bookings
+    // No need to update inventory since we calculate availability from total_rooms - active_bookings
+    if (!error && data && data.length > 0) {
+      console.log(`Booking created successfully: ${room_id} (${bookedRooms + 1} rooms now booked out of ${roomInventory.total_rooms})`);
     }
   } catch (insertError) {
     console.error('Staff booking creation error:', insertError);
@@ -382,6 +461,102 @@ router.post('/', (req, res, next) => { console.log(`[${new Date().toISOString()}
   });
 });
 
+
+// PUT update booking status (superadmin, receptionist) 
+router.put('/:id', requireRole(['superadmin', 'receptionist']), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    
+    // Validate status
+    const validStatuses = ['pending', 'confirmed', 'checked_in', 'checked_out', 'completed', 'cancelled'];
+    if (!status || !validStatuses.includes(status)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Invalid status. Valid statuses: ' + validStatuses.join(', ') 
+      });
+    }
+    
+    // Check if booking exists
+    const { data: existingBooking, error: fetchError } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('id', id)
+      .single();
+    
+    if (fetchError || !existingBooking) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Booking not found' 
+      });
+    }
+    
+    // Update booking status
+    const { data: updatedBooking, error: updateError } = await supabase
+      .from('bookings')
+      .update({ 
+        status,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+    
+    if (updateError) {
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Failed to update booking status' 
+      });
+    }
+
+    // If checking out, restore room availability
+    if (status === 'checked_out' || status === 'completed') {
+      try {
+        // Map UUID back to room type for inventory update
+        const UUID_TO_ROOM_TYPE = {
+          '11111111-1111-1111-1111-111111111111': 'classic-single',
+          '22222222-2222-2222-2222-222222222222': 'deluxe',
+          '33333333-3333-3333-3333-333333333333': 'deluxe-large',
+          '44444444-4444-4444-4444-444444444444': 'business-suite',
+          '55555555-5555-5555-5555-555555555555': 'executive-suite'
+        };
+
+        const roomTypeId = UUID_TO_ROOM_TYPE[existingBooking.room_id];
+        if (roomTypeId) {
+          // Increase available room count by 1
+          const { error: inventoryError } = await supabase
+            .from('room_inventory')
+            .update({ 
+              available_rooms: supabase.raw('available_rooms + 1'),
+              updated_at: new Date().toISOString()
+            })
+            .eq('room_type_id', roomTypeId);
+
+          if (inventoryError) {
+            console.error('Failed to restore room availability:', inventoryError);
+            // Don't fail the whole operation, just log the error
+          }
+        }
+      } catch (roomError) {
+        console.error('Error restoring room availability:', roomError);
+        // Don't fail the checkout process for this
+      }
+    }
+
+    res.json({ 
+      success: true,
+      message: `Booking status updated to ${status}`,
+      booking: updatedBooking
+    });
+
+  } catch (error) {
+    console.error('Error updating booking:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Internal server error' 
+    });
+  }
+});
 
 // DELETE booking (superadmin, receptionist)
 router.delete('/:id', requireRole(['superadmin', 'receptionist']), async (req, res) => {
@@ -427,32 +602,10 @@ router.delete('/:id', requireRole(['superadmin', 'receptionist']), async (req, r
     
     const roomTypeId = ROOM_TYPES[existingBooking.room_id];
     
+    // Note: Room availability is calculated dynamically based on active bookings
+    // No need to restore inventory count since cancellation removes the booking from availability calculation
     if (roomTypeId) {
-      // Get current room inventory
-      const { data: roomInventory, error: inventoryError } = await supabase
-        .from('room_inventory')
-        .select('available_rooms')
-        .eq('room_type_id', roomTypeId)
-        .eq('is_active', true)
-        .single();
-
-      if (!inventoryError && roomInventory) {
-        // Restore one room to available inventory
-        const { error: updateError } = await supabase
-          .from('room_inventory')
-          .update({ 
-            available_rooms: roomInventory.available_rooms + 1,
-            updated_at: new Date().toISOString()
-          })
-          .eq('room_type_id', roomTypeId)
-          .eq('is_active', true);
-
-        if (updateError) {
-          console.error('Failed to restore room availability:', updateError);
-        } else {
-          console.log(`Restored room availability: ${roomTypeId} now has ${roomInventory.available_rooms + 1} available rooms`);
-        }
-      }
+      console.log(`Booking cancelled: room type ${roomTypeId} now has one less active booking`);
     }
     
     res.json({ 

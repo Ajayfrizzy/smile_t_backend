@@ -96,8 +96,9 @@ router.post('/', requireRole(['superadmin', 'barmen']), async (req, res) => {
   try {
     const { drink_id, quantity } = req.body;
     
-    // Extract staff ID - handle different possible formats
-    // Ensure we have authenticated user
+    // Extract staff info from authenticated user
+    const staffId = req.user.id;
+    const staffRole = req.user.role;
     if (!req.user || !req.user.id) {
       return res.status(401).json({
         success: false,
@@ -143,10 +144,11 @@ router.post('/', requireRole(['superadmin', 'barmen']), async (req, res) => {
       .insert([
         {
           drink_id: parseInt(drink_id),
-          staff_id: req.user.id, // Use the actual user ID from the database
+          staff_id: req.user.id,
+          staff_role: req.user.role,
           quantity: parseInt(quantity),
-          amount: total_amount, // Add the calculated amount field
-          drink_name: drink.drink_name // Add required drink_name field
+          amount: total_amount,
+          drink_name: drink.drink_name
         }
       ])
       .select()

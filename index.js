@@ -13,8 +13,13 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
-      scriptSrc: ["'self'"],
-      imgSrc: ["'self'", "data:", "https:"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://checkout.flutterwave.com", "https://*.flutterwave.com", "https://*.f4b-flutterwave.com", "data:"],
+      imgSrc: ["'self'", "data:", "https:", "blob:"],
+      connectSrc: ["'self'", "https://*.flutterwave.com", "https://*.f4b-flutterwave.com", "https://smile-t-backend.onrender.com", "wss:", "https://smile-tcontinental.com", "https://www.smile-tcontinental.com"],
+      frameSrc: ["'self'", "https://*.flutterwave.com", "https://*.f4b-flutterwave.com"],
+      objectSrc: ["'none'"],
+      mediaSrc: ["'self'", "data:", "https:"],
+      fontSrc: ["'self'", "data:", "https:"]
     },
   },
 }));
@@ -25,13 +30,19 @@ app.use(cors({
     'http://localhost:3000',
     'http://localhost:5173',
     'https://smile-t-continental.vercel.app',
-    'https://your-frontend-domain.com',
-    null  // Allow file:// origins for debugging
+    'https://smile-tcontinental.com',
+    'https://www.smile-tcontinental.com',
+    'http://smile-tcontinental.com',
+    'http://www.smile-tcontinental.com'
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept', 'X-Requested-With'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range']
 }));
+
+// Handle preflight requests
+app.options('*', cors());
 
 // Rate limiting
 const limiter = rateLimit({
@@ -84,9 +95,8 @@ try {
   // Bar sales routes
   app.use('/bar-sales', require('./routes/bar-sales'));
   
-  // Analytics and reports routes
-  app.use('/analytics', require('./routes/analytics'));
-  app.use('/reports', require('./routes/reports'));
+  // Settings routes
+  app.use('/settings', require('./routes/settings'));
   
   // Transactions routes
   app.use('/transactions', require('./routes/transactions'));

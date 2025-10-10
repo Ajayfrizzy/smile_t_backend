@@ -1,6 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const { createClient } = require('@supabase/supabase-js');
+const { cacheMiddleware, invalidateCache } = require('../utils/cache');
+
+// Cache keys for drinks
+const CACHE_KEYS = {
+  ALL_DRINKS: 'all_drinks',
+  DRINK_CATEGORIES: 'drink_categories',
+  DRINK_BY_CATEGORY: (category) => `drinks_${category}`,
+  LOW_STOCK: 'low_stock_drinks'
+};
 const { requireRole } = require('../middleware/auth');
 
 const supabase = createClient(

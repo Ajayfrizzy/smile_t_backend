@@ -1,6 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const { createClient } = require('@supabase/supabase-js');
+const { cacheMiddleware, invalidateCache } = require('../utils/cache');
+
+// Cache keys for bar sales
+const CACHE_KEYS = {
+  TODAY_SALES: 'today_bar_sales',
+  DAILY_SALES: (date) => `bar_sales_${date}`,
+  MONTHLY_SUMMARY: (month) => `bar_sales_summary_${month}`,
+  TOP_SELLING: 'top_selling_drinks'
+};
 const { requireRole } = require('../middleware/auth');
 
 const supabase = createClient(

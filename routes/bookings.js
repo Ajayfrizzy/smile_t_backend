@@ -3,6 +3,15 @@ const router = express.Router();
 const { createClient } = require('@supabase/supabase-js');
 const nodemailer = require('nodemailer');
 const rateLimit = require('express-rate-limit');
+const { cacheMiddleware, invalidateCache } = require('../utils/cache');
+
+// Cache keys for bookings
+const CACHE_KEYS = {
+  TODAY_BOOKINGS: 'today_bookings',
+  UPCOMING_BOOKINGS: 'upcoming_bookings',
+  MONTHLY_BOOKINGS: (month) => `monthly_bookings_${month}`,
+  BOOKING_DETAIL: (id) => `booking_${id}`
+};
 
 const supabase = createClient(
   process.env.SUPABASE_URL,

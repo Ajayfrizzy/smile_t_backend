@@ -15,7 +15,7 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'"],
       scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://checkout.flutterwave.com", "https://*.flutterwave.com", "https://*.f4b-flutterwave.com", "data:"],
       imgSrc: ["'self'", "data:", "https:", "blob:"],
-      connectSrc: ["'self'", "https://*.flutterwave.com", "https://*.f4b-flutterwave.com", "https://smile-t-backend.onrender.com", "wss:", "https://smile-tcontinental.com", "https://www.smile-tcontinental.com"],
+      connectSrc: ["'self'", "https://*.flutterwave.com", "https://*.f4b-flutterwave.com", "https://smile-t-backend.onrender.com", "wss:", "https://*.smile-tcontinental.com"],
       frameSrc: ["'self'", "https://*.flutterwave.com", "https://*.f4b-flutterwave.com"],
       objectSrc: ["'none'"],
       mediaSrc: ["'self'", "data:", "https:"],
@@ -30,8 +30,6 @@ app.use(cors({
     'http://localhost:3000',
     'http://localhost:5173',
     'https://smile-t-continental.vercel.app',
-    'https://smile-tcontinental.com',
-    'https://www.smile-tcontinental.com',
     'http://smile-tcontinental.com',
     'http://www.smile-tcontinental.com'
   ],
@@ -143,13 +141,13 @@ app.use('*', (req, res) => {
     message: `Route ${req.method} ${req.originalUrl} not found`,
     availableRoutes: [
       'GET /health',
-      'POST /api/auth/login',
-      'GET /api/staff',
-      'GET /api/room-inventory',
-      'GET /api/bookings',
-      'GET /api/drinks',
-      'GET /api/analytics',
-      'POST /api/payments/initiate'
+      'POST /auth/login',
+      'GET /staff',
+      'GET /room-inventory',
+      'GET /bookings',
+      'GET /drinks',
+      'GET /analytics',
+      'POST /payments/initiate'
     ]
   });
 });

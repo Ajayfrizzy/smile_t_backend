@@ -2,6 +2,14 @@ const express = require('express');
 const router = express.Router();
 const { createClient } = require('@supabase/supabase-js');
 const { requireRole } = require('../middleware/auth');
+const { cacheMiddleware, invalidateCache } = require('../utils/cache');
+
+// Cache keys
+const CACHE_KEYS = {
+  ALL_ROOMS: 'all_rooms',
+  AVAILABLE_ROOMS: (dates) => `available_rooms_${dates}`,
+  ROOM_TYPE: (type) => `room_type_${type}`
+};
 
 const supabase = createClient(
   process.env.SUPABASE_URL,

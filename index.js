@@ -2,9 +2,13 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const compression = require('compression');
 require('dotenv').config();
 
 const app = express();
+
+// Enable compression
+app.use(compression());
 
 // Security middleware
 app.use(helmet({
@@ -172,11 +176,17 @@ process.on('SIGINT', () => {
 // Start server
 const PORT = process.env.PORT || 5000;
 const server = app.listen(PORT, () => {
+  // Log memory usage on startup
+  const used = process.memoryUsage();
   console.log('===============================================');
   console.log(`Smile-T Continental Backend Server Started`);
   console.log(`Server running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`Started at: ${new Date().toISOString()}`);
+  console.log('\nInitial Memory Usage:');
+  for (let key in used) {
+    console.log(`${key}: ${Math.round(used[key] / 1024 / 1024 * 100) / 100} MB`);
+  }
   console.log('===============================================');
   
   // Log available endpoints

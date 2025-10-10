@@ -34,6 +34,8 @@ app.use(cors({
     'http://localhost:3000',
     'http://localhost:5173',
     'https://smile-t-continental.vercel.app',
+    'https://smile-tcontinental.com',
+    'https://www.smile-tcontinental.com',
     'http://smile-tcontinental.com',
     'http://www.smile-tcontinental.com'
   ],

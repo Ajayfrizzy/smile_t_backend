@@ -108,7 +108,9 @@ router.post('/', requireRole(['superadmin', 'barmen']), async (req, res) => {
     // Extract staff info from authenticated user
     const staffId = req.user.id;
     const staffRole = req.user.role;
-    if (!req.user || !req.user.id) {
+
+    // Ensure authenticated user
+    if (!staffId || !staffRole) {
       return res.status(401).json({
         success: false,
         message: 'Authentication required'
@@ -154,10 +156,11 @@ router.post('/', requireRole(['superadmin', 'barmen']), async (req, res) => {
         {
           drink_id: parseInt(drink_id),
           staff_id: req.user.id,
-          staff_role: req.user.role,
+          staff_role: req.user.role, // This will be either 'superadmin' or 'barman'
           quantity: parseInt(quantity),
           amount: total_amount,
-          drink_name: drink.drink_name
+          drink_name: drink.drink_name,
+          date: new Date().toISOString()
         }
       ])
       .select()

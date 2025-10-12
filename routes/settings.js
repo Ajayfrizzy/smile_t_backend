@@ -1,5 +1,16 @@
+const express = require('express');
+const router = express.Router();
+const bcrypt = require('bcrypt');
+const { createClient } = require('@supabase/supabase-js');
+const { requireRole } = require('../middleware/auth');
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
+
 // PUT update password and settings
-router.put('/settings', requireRole(['superadmin', 'supervisor', 'receptionist', 'barmen']), async (req, res) => {
+router.put('/', requireRole(['superadmin', 'supervisor', 'receptionist', 'barmen']), async (req, res) => {
   try {
     const { currentPassword, newPassword, name } = req.body;
     const userId = req.user.id;
@@ -76,3 +87,5 @@ router.put('/settings', requireRole(['superadmin', 'supervisor', 'receptionist',
     });
   }
 });
+
+module.exports = router;

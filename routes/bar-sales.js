@@ -47,7 +47,7 @@ router.get('/', requireRole(['superadmin', 'supervisor', 'barmen']), async (req,
         // Get staff data  
         const { data: staffData } = await supabase
           .from('staff')
-          .select('id, name, staff_id');
+          .select('id, name, staff_id, role');
         
         // Enrich the bar sales data to match frontend expectations
         enrichedData = enrichedData.map(sale => {
@@ -63,9 +63,9 @@ router.get('/', requireRole(['superadmin', 'supervisor', 'barmen']), async (req,
             // Nested objects as expected by frontend
             drinks: drink ? {
               id: drink.id,
+              name: drink.drink_name, // Map drink_name to name for frontend
               drink_name: drink.drink_name,
-              price: drink.price,
-              category: drink.category
+              price: drink.price
             } : null,
             staff: staff ? {
               id: staff.id,
@@ -77,6 +77,7 @@ router.get('/', requireRole(['superadmin', 'supervisor', 'barmen']), async (req,
             drink_name: drink?.drink_name || sale.drink_name,
             drink_price: drink?.price,
             staff_name: staff?.name,
+            staff_role: staff?.role || sale.staff_role,
             staff_code: staff?.staff_id
           };
         });

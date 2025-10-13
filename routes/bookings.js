@@ -532,18 +532,35 @@ router.put('/:id', requireRole(['superadmin', 'receptionist']), async (req, res)
 
         const roomTypeId = UUID_TO_ROOM_TYPE[existingBooking.room_id];
         if (roomTypeId) {
-          // Increase available room count by 1
-          const { error: inventoryError } = await supabase
+          // Get current available rooms
+          const { data: currentInventory, error: fetchInventoryError } = await supabase
             .from('room_inventory')
-            .update({ 
-              available_rooms: supabase.raw('available_rooms + 1'),
-              updated_at: new Date().toISOString()
-            })
-            .eq('room_type_id', roomTypeId);
+            .select('available_rooms, total_rooms')
+            .eq('room_type_id', roomTypeId)
+            .single();
 
-          if (inventoryError) {
-            console.error('Failed to restore room availability:', inventoryError);
-            // Don't fail the whole operation, just log the error
+          if (fetchInventoryError) {
+            console.error('Failed to fetch room inventory:', fetchInventoryError);
+          } else if (currentInventory) {
+            // Increase available room count by 1, but don't exceed total_rooms
+            const newAvailableRooms = Math.min(
+              (currentInventory.available_rooms || 0) + 1,
+              currentInventory.total_rooms || 0
+            );
+
+            const { error: inventoryError } = await supabase
+              .from('room_inventory')
+              .update({ 
+                available_rooms: newAvailableRooms,
+                updated_at: new Date().toISOString()
+              })
+              .eq('room_type_id', roomTypeId);
+
+            if (inventoryError) {
+              console.error('Failed to restore room availability:', inventoryError);
+            } else {
+              console.log(`Successfully restored room availability for ${roomTypeId}. Available rooms: ${newAvailableRooms}`);
+            }
           }
         }
       } catch (roomError) {

@@ -13,18 +13,31 @@ const supabase = createClient(
 );
 
 // Configure Zoho SMTP transporter for emails
-const transporter = nodemailer.createTransport({
-  host: 'smtp.zoho.com',
-  port: 465,
-  secure: true,
-  auth: {
-    user: process.env.ZOHO_EMAIL,
-    pass: process.env.ZOHO_PASSWORD
-  }
-});
+// Make transporter optional if email credentials are not configured
+let transporter = null;
+if (process.env.ZOHO_EMAIL && process.env.ZOHO_PASSWORD) {
+  transporter = nodemailer.createTransport({
+    host: 'smtp.zoho.com',
+    port: 465,
+    secure: true,
+    auth: {
+      user: process.env.ZOHO_EMAIL,
+      pass: process.env.ZOHO_PASSWORD
+    }
+  });
+  console.log('✅ Email transporter configured');
+} else {
+  console.warn('⚠️ Email credentials not configured - emails will not be sent');
+}
 
 // Send booking confirmation email
 async function sendBookingConfirmationEmail(booking) {
+  // Skip if email not configured
+  if (!transporter) {
+    console.log('ℹ️ Email not configured - skipping confirmation email');
+    return false;
+  }
+  
   try {
     // Room type mappings for email
     const ROOM_TYPES = {
@@ -196,6 +209,8 @@ router.post('/initiate', async (req, res) => {
 router.post('/verify', async (req, res) => {
   const { tx_ref, transaction_id } = req.body;
   
+  console.log('🔍 Payment verification requested:', { tx_ref, transaction_id });
+  
   if (!tx_ref && !transaction_id) {
     return res.status(400).json({ 
       success: false,
@@ -210,6 +225,8 @@ router.post('/verify', async (req, res) => {
       ? `https://api.flutterwave.com/v3/transactions/${transaction_id}/verify`
       : `https://api.flutterwave.com/v3/transactions/verify_by_reference?tx_ref=${tx_ref}`;
     
+    console.log('📡 Calling Flutterwave API:', endpoint);
+    
     const response = await axios.get(
       endpoint,
       { headers: { Authorization: `Bearer ${FLW_SECRET_KEY}` } }
@@ -217,8 +234,12 @@ router.post('/verify', async (req, res) => {
     
     const { data } = response.data;
     
+    console.log('💳 Payment status from Flutterwave:', data.status);
+    
     // Check if payment was successful
     if (data.status === 'successful') {
+      console.log('✅ Payment verified successfully, updating booking...');
+      
       // Update booking status in database
       try {
         const { data: bookings, error: fetchError } = await supabase
@@ -229,6 +250,12 @@ router.post('/verify', async (req, res) => {
 
         if (!fetchError && bookings && bookings.length > 0) {
           const booking = bookings[0];
+          
+          console.log('📋 Booking found:', { 
+            id: booking.id, 
+            guest: booking.guest_name,
+            current_status: booking.payment_status 
+          });
           
           // Only update if not already confirmed (prevent duplicate emails)
           if (booking.payment_status !== 'paid') {
@@ -246,15 +273,22 @@ router.post('/verify', async (req, res) => {
               console.log('✅ Booking status updated to confirmed for:', tx_ref);
               
               // Send confirmation email
-              await sendBookingConfirmationEmail(booking);
+              console.log('📧 Attempting to send confirmation email...');
+              const emailSent = await sendBookingConfirmationEmail(booking);
+              if (emailSent) {
+                console.log('✅ Confirmation email sent successfully');
+              }
             } else {
               console.error('❌ Error updating booking status:', updateError);
             }
           } else {
-            console.log('ℹ️ Booking already confirmed, skipping email:', tx_ref);
+            console.log('ℹ️ Booking already confirmed, skipping update and email:', tx_ref);
           }
         } else {
           console.warn('⚠️ Booking not found for transaction reference:', tx_ref);
+          if (fetchError) {
+            console.error('Database fetch error:', fetchError);
+          }
         }
       } catch (dbError) {
         console.error('❌ Database error during booking update:', dbError);

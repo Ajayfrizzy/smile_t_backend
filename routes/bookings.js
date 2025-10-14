@@ -139,6 +139,86 @@ router.get('/', requireRole(['superadmin', 'supervisor', 'receptionist']), async
   }
 });
 
+// GET booking by transaction reference (public endpoint for payment verification)
+router.get('/by-reference/:tx_ref', async (req, res) => {
+  const { tx_ref } = req.params;
+  
+  if (!tx_ref) {
+    return res.status(400).json({ 
+      success: false, 
+      message: 'Transaction reference is required' 
+    });
+  }
+
+  try {
+    const { data: bookings, error } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('transaction_ref', tx_ref)
+      .limit(1);
+
+    if (error) {
+      console.error('Booking fetch error:', error);
+      return res.status(500).json({ 
+        success: false, 
+        message: error.message 
+      });
+    }
+
+    if (!bookings || bookings.length === 0) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Booking not found' 
+      });
+    }
+
+    const booking = bookings[0];
+
+    // Room type mappings
+    const ROOM_TYPES = {
+      '11111111-1111-1111-1111-111111111111': {
+        room_type: "Classic Single",
+        price_per_night: 24900
+      },
+      '22222222-2222-2222-2222-222222222222': {
+        room_type: "Deluxe",
+        price_per_night: 30500
+      },
+      '33333333-3333-3333-3333-333333333333': {
+        room_type: "Deluxe Large",
+        price_per_night: 36600
+      },
+      '44444444-4444-4444-4444-444444444444': {
+        room_type: "Business Suite",
+        price_per_night: 54900
+      },
+      '55555555-5555-5555-5555-555555555555': {
+        room_type: "Executive Suite",
+        price_per_night: 54900
+      }
+    };
+
+    const roomType = ROOM_TYPES[booking.room_id];
+    
+    const enrichedBooking = {
+      ...booking,
+      room_name: roomType?.room_type || 'Unknown Room',
+      reference: booking.transaction_ref
+    };
+
+    res.json({ 
+      success: true, 
+      booking: enrichedBooking 
+    });
+  } catch (error) {
+    console.error('Get booking by reference error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Internal server error' 
+    });
+  }
+});
+
 // POST create public booking (for customer bookings)
 router.post('/public', async (req, res) => {
   const {

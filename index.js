@@ -17,13 +17,15 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://checkout.flutterwave.com", "https://*.flutterwave.com", "https://*.f4b-flutterwave.com", "data:"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://checkout.flutterwave.com", "https://*.flutterwave.com", "https://*.f4b-flutterwave.com", "https://cdn.mxpnl.com", "data:"],
       imgSrc: ["'self'", "data:", "https:", "blob:"],
-      connectSrc: ["'self'", "https://*.flutterwave.com", "https://*.f4b-flutterwave.com", "https://smile-t-backend.onrender.com", "wss:", "https://*.smile-tcontinental.com"],
-      frameSrc: ["'self'", "https://*.flutterwave.com", "https://*.f4b-flutterwave.com"],
+      connectSrc: ["'self'", "https://*.flutterwave.com", "https://*.f4b-flutterwave.com", "https://api.fpjs.io", "https://metrics.flutterwave.com", "https://smile-t-backend.onrender.com", "wss:", "https://*.smile-tcontinental.com"],
+      frameSrc: ["'self'", "https://*.flutterwave.com", "https://*.f4b-flutterwave.com", "https://checkout-v3-ui-prod.f4b-flutterwave.com"],
       objectSrc: ["'none'"],
       mediaSrc: ["'self'", "data:", "https:"],
-      fontSrc: ["'self'", "data:", "https:"]
+      fontSrc: ["'self'", "data:", "https:"],
+      workerSrc: ["'self'", "blob:"],
+      childSrc: ["'self'", "blob:", "https://*.flutterwave.com"]
     },
   },
 }));
@@ -107,6 +109,12 @@ try {
   
   // Payment routes
   app.use('/payments', require('./routes/flutterwave'));
+  
+  // Alias for flutterwave verification (for backward compatibility)
+  app.post('/flutterwave-verify', async (req, res, next) => {
+    req.url = '/payments/verify';
+    app.handle(req, res, next);
+  });
   
   console.log(' All routes loaded successfully');
 } catch (error) {

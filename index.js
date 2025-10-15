@@ -50,10 +50,12 @@ app.use(cors({
 // Handle preflight requests
 app.options('*', cors());
 
-// Rate limiting
+// Rate limiting - Increased for staff operations
+// Staff members can make up to 300 requests per 15 minutes
+// This allows for frequent dashboard refreshes, booking operations, and login attempts
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  max: 300, // Increased from 100 to 300 requests per windowMs for better staff experience
   message: {
     success: false,
     message: 'Too many requests from this IP, please try again later.'

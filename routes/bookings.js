@@ -551,14 +551,68 @@ router.post('/', (req, res, next) => { console.log(`[${new Date().toISOString()}
 });
 
 
+// Booking statuses that should restore room to inventory
+// These statuses indicate the room is no longer occupied and should be available
+const ROOM_FREEING_STATUSES = [
+  'checked_out',   // Guest completed stay normally
+  'completed',     // Booking finished
+  'cancelled',     // Booking cancelled (guest won't arrive)
+  'no_show',       // Guest didn't show up
+  'voided'         // Booking voided/invalidated
+];
+
+// Helper function to restore room to inventory
+async function restoreRoomToInventory(roomId, roomTypeId) {
+  try {
+    const { data: currentInventory, error: fetchInventoryError } = await supabase
+      .from('room_inventory')
+      .select('available_rooms, total_rooms')
+      .eq('room_type_id', roomTypeId)
+      .single();
+
+    if (fetchInventoryError) {
+      console.error('Failed to fetch room inventory:', fetchInventoryError);
+      return false;
+    }
+
+    if (currentInventory) {
+      // Increase available room count by 1, but don't exceed total_rooms
+      const newAvailableRooms = Math.min(
+        (currentInventory.available_rooms || 0) + 1,
+        currentInventory.total_rooms || 0
+      );
+
+      const { error: inventoryError } = await supabase
+        .from('room_inventory')
+        .update({ 
+          available_rooms: newAvailableRooms,
+          updated_at: new Date().toISOString()
+        })
+        .eq('room_type_id', roomTypeId);
+
+      if (inventoryError) {
+        console.error('Failed to restore room availability:', inventoryError);
+        return false;
+      }
+
+      console.log(`✅ Room restored: ${roomTypeId} → ${newAvailableRooms} available`);
+      return true;
+    }
+  } catch (error) {
+    console.error('Error restoring room availability:', error);
+    return false;
+  }
+  return false;
+}
+
 // PUT update booking status (superadmin, receptionist) 
 router.put('/:id', requireRole(['superadmin', 'receptionist']), async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
     
-    // Validate status
-    const validStatuses = ['pending', 'confirmed', 'checked_in', 'checked_out', 'completed', 'cancelled'];
+    // Validate status - now supporting more statuses for better tracking
+    const validStatuses = ['pending', 'confirmed', 'checked_in', 'checked_out', 'completed', 'cancelled', 'no_show', 'voided'];
     if (!status || !validStatuses.includes(status)) {
       return res.status(400).json({ 
         success: false, 
@@ -598,10 +652,14 @@ router.put('/:id', requireRole(['superadmin', 'receptionist']), async (req, res)
       });
     }
 
-    // If checking out, restore room availability
-    if (status === 'checked_out' || status === 'completed') {
+    // STATUS-BASED ROOM RESTORATION
+    // If new status frees the room, restore it to inventory
+    const wasRoomFreed = ROOM_FREEING_STATUSES.includes(existingBooking.status);
+    const isRoomBeingFreed = ROOM_FREEING_STATUSES.includes(status);
+    
+    if (isRoomBeingFreed && !wasRoomFreed) {
+      // Room is being freed for the first time
       try {
-        // Map UUID back to room type for inventory update
         const UUID_TO_ROOM_TYPE = {
           '11111111-1111-1111-1111-111111111111': 'classic-single',
           '22222222-2222-2222-2222-222222222222': 'deluxe',
@@ -612,46 +670,27 @@ router.put('/:id', requireRole(['superadmin', 'receptionist']), async (req, res)
 
         const roomTypeId = UUID_TO_ROOM_TYPE[existingBooking.room_id];
         if (roomTypeId) {
-          // Get current available rooms
-          const { data: currentInventory, error: fetchInventoryError } = await supabase
-            .from('room_inventory')
-            .select('available_rooms, total_rooms')
-            .eq('room_type_id', roomTypeId)
-            .single();
-
-          if (fetchInventoryError) {
-            console.error('Failed to fetch room inventory:', fetchInventoryError);
-          } else if (currentInventory) {
-            // Increase available room count by 1, but don't exceed total_rooms
-            const newAvailableRooms = Math.min(
-              (currentInventory.available_rooms || 0) + 1,
-              currentInventory.total_rooms || 0
-            );
-
-            const { error: inventoryError } = await supabase
-              .from('room_inventory')
-              .update({ 
-                available_rooms: newAvailableRooms,
-                updated_at: new Date().toISOString()
-              })
-              .eq('room_type_id', roomTypeId);
-
-            if (inventoryError) {
-              console.error('Failed to restore room availability:', inventoryError);
-            } else {
-              console.log(`Successfully restored room availability for ${roomTypeId}. Available rooms: ${newAvailableRooms}`);
-            }
-          }
+          await restoreRoomToInventory(existingBooking.room_id, roomTypeId);
+          console.log(`📊 Status changed: ${existingBooking.status} → ${status} | Room freed ✅`);
         }
       } catch (roomError) {
         console.error('Error restoring room availability:', roomError);
-        // Don't fail the checkout process for this
+        // Don't fail the status update for this
       }
+    } else if (wasRoomFreed && !isRoomBeingFreed) {
+      // Room was freed but now being taken back (fixing a mistake)
+      console.log(`⚠️ Warning: Changing from ${existingBooking.status} to ${status} - room may need manual inventory adjustment`);
+    }
+
+    // Determine appropriate success message based on status
+    let message = `Booking status updated to ${status}`;
+    if (isRoomBeingFreed && !wasRoomFreed) {
+      message += ' - Room returned to inventory';
     }
 
     res.json({ 
       success: true,
-      message: `Booking status updated to ${status}`,
+      message,
       booking: updatedBooking
     });
 
@@ -664,8 +703,11 @@ router.put('/:id', requireRole(['superadmin', 'receptionist']), async (req, res)
   }
 });
 
-// DELETE booking (superadmin, receptionist)
-router.delete('/:id', requireRole(['superadmin', 'receptionist']), async (req, res) => {
+// DELETE booking (SUPERADMIN ONLY - for cancellations/errors)
+// For ACTIVE bookings (not checked out): Restores room to inventory
+// For CHECKED-OUT bookings: Should not be deleted (UI hides button)
+// Receptionist cannot delete - only SuperAdmin
+router.delete('/:id', requireRole(['superadmin']), async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -682,8 +724,21 @@ router.delete('/:id', requireRole(['superadmin', 'receptionist']), async (req, r
         message: 'Booking not found' 
       });
     }
+
+    // ⚠️ WARNING: Prefer using status updates (cancelled, no_show, voided) instead of deletion
+    // Check if booking room was already freed (checked_out, completed, cancelled, no_show, voided)
+    const isRoomAlreadyFreed = ROOM_FREEING_STATUSES.includes(existingBooking.status);
     
-    // Delete the booking
+    if (isRoomAlreadyFreed) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot delete bookings with freed rooms. Room has already been returned to inventory. Consider keeping for records.'
+      });
+    }
+    
+    console.warn(`⚠️ DELETING BOOKING ${id} - Consider using 'cancelled' status instead for audit trail`);
+    
+    // Delete the booking first
     const { error: deleteError } = await supabase
       .from('bookings')
       .delete()
@@ -695,28 +750,20 @@ router.delete('/:id', requireRole(['superadmin', 'receptionist']), async (req, r
         message: 'Failed to cancel booking' 
       });
     }
-
-    // Restore room availability after successful deletion
-    // Extract room type from room_id UUID (using ROOM_TYPES mapping)
-    const ROOM_TYPES = {
-      '11111111-1111-1111-1111-111111111111': 'classic-single',
-      '22222222-2222-2222-2222-222222222222': 'deluxe',
-      '33333333-3333-3333-3333-333333333333': 'deluxe-large',
-      '44444444-4444-4444-4444-444444444444': 'business-suite',
-      '55555555-5555-5555-5555-555555555555': 'executive-suite'
-    };
     
-    const roomTypeId = ROOM_TYPES[existingBooking.room_id];
-    
-    // Note: Room availability is calculated dynamically based on active bookings
-    // No need to restore inventory count since cancellation removes the booking from availability calculation
-    if (roomTypeId) {
-      console.log(`Booking cancelled: room type ${roomTypeId} now has one less active booking`);
+    // For ACTIVE bookings (not checked out), restore room availability
+    // This is because the guest never actually occupied the room or it was cancelled
+    if (existingBooking.room_id && existingBooking.room_type_id) {
+      await restoreRoomToInventory(existingBooking.room_id, existingBooking.room_type_id);
+      console.log(`✅ Room restored after deleting active booking. Room Type: ${existingBooking.room_type_id}`);
     }
+    
+    console.warn(`⚠️ Booking permanently deleted: ${id} - Consider using status updates for audit trail`);
+    
     
     res.json({ 
       success: true, 
-      message: 'Booking cancelled successfully' 
+      message: 'Booking cancelled successfully and room returned to inventory' 
     });
     
   } catch (error) {

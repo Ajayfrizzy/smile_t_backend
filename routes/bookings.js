@@ -21,16 +21,44 @@ const supabase = createClient(
 
 const { requireRole } = require('../middleware/auth');
 
-// Configure Zoho SMTP transporter
-const transporter = nodemailer.createTransport({
-  host: 'smtp.zoho.com',
-  port: 465,
-  secure: true,
-  auth: {
-    user: process.env.ZOHO_EMAIL, // Your Zoho email address
-    pass: process.env.ZOHO_PASSWORD // Your Zoho app password
+// Configure Email transporter (Gmail or Zoho)
+let transporter = null;
+if ((process.env.GMAIL_EMAIL && process.env.GMAIL_PASSWORD) || (process.env.ZOHO_EMAIL && process.env.ZOHO_PASSWORD)) {
+  try {
+    // Prefer Gmail (more reliable) over Zoho
+    if (process.env.GMAIL_EMAIL && process.env.GMAIL_PASSWORD) {
+      transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: process.env.GMAIL_EMAIL,
+          pass: process.env.GMAIL_PASSWORD
+        }
+      });
+      console.log('✅ Bookings email transporter configured (Gmail)');
+    } else {
+      // Fallback to Zoho - CORRECTED PORT
+      transporter = nodemailer.createTransport({
+        host: 'smtp.zoho.com',
+        port: 587,              // ✅ FIXED: Use port 587 for TLS
+        secure: false,          // ✅ FIXED: false for port 587
+        auth: {
+          user: process.env.ZOHO_EMAIL,
+          pass: process.env.ZOHO_PASSWORD
+        },
+        tls: {
+          ciphers: 'SSLv3',
+          rejectUnauthorized: false
+        }
+      });
+      console.log('✅ Bookings email transporter configured (Zoho SMTP - Port 587)');
+    }
+  } catch (err) {
+    console.error('❌ Error creating bookings email transporter:', err.message);
+    transporter = null;
   }
-});
+} else {
+  console.warn('⚠️ Email credentials not configured - booking emails will not be sent');
+}
 
 // Simple logging middleware
 router.use((req, res, next) => {
@@ -46,24 +74,86 @@ const limiter = rateLimit({
 });
 router.use(limiter);
 
-// After payment verification and booking confirmation
+// Send booking confirmation email - with timeout protection
 async function sendBookingConfirmationEmail(booking) {
-  const mailOptions = {
-    from: process.env.ZOHO_EMAIL,
-    to: booking.guest_email,
-    subject: 'Booking Confirmation - ' + booking.transaction_ref,
-    html: `
-      <h2>Your Booking is Confirmed</h2>
-      <p>Reference: <strong>${booking.transaction_ref}</strong></p>
-      <p>Guest Name: ${booking.guest_name}</p>
-      <p>Room: ${booking.room_name || booking.room_id}</p>
-      <p>Check-in: ${booking.check_in}</p>
-      <p>Check-out: ${booking.check_out}</p>
-      <p>Total Paid: ₦${booking.total_amount}</p>
-      <p>Please present this email at reception for check-in.</p>
-    `
-  };
-  await transporter.sendMail(mailOptions);
+  // Skip if email not configured
+  if (!transporter) {
+    console.log('ℹ️ Email not configured - skipping booking confirmation email');
+    return false;
+  }
+  
+  // Validate booking data
+  if (!booking || !booking.guest_email) {
+    console.error('❌ Invalid booking data for email - missing guest_email');
+    return false;
+  }
+  
+  try {
+    const mailOptions = {
+      from: `Smile-T Continental Hotel <${process.env.GMAIL_EMAIL || process.env.ZOHO_EMAIL}>`,
+      to: booking.guest_email,
+      subject: `✅ Booking Confirmation - ${booking.transaction_ref}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <div style="background: linear-gradient(135deg, #7B3F00 0%, #A0522D 100%); color: white; padding: 30px; text-align: center;">
+            <h1 style="margin: 0;">🏨 Smile-T Continental Hotel</h1>
+            <p style="margin: 10px 0 0 0;">Booking Confirmation</p>
+          </div>
+          
+          <div style="padding: 30px; background: white; border: 1px solid #ddd;">
+            <h2 style="color: #7B3F00;">Your Booking is Confirmed!</h2>
+            
+            <div style="background: #f9f9f9; padding: 20px; border-radius: 8px; margin: 20px 0;">
+              <p><strong style="color: #7B3F00;">Booking Reference:</strong> ${booking.transaction_ref}</p>
+              <p><strong style="color: #7B3F00;">Guest Name:</strong> ${booking.guest_name}</p>
+              <p><strong style="color: #7B3F00;">Room:</strong> ${booking.room_name || 'Room'}</p>
+              <p><strong style="color: #7B3F00;">Check-in:</strong> ${new Date(booking.check_in).toLocaleDateString()}</p>
+              <p><strong style="color: #7B3F00;">Check-out:</strong> ${new Date(booking.check_out).toLocaleDateString()}</p>
+              <p><strong style="color: #7B3F00;">Total Amount:</strong> ₦${Number(booking.total_amount).toLocaleString()}</p>
+            </div>
+            
+            <div style="background: #fff3cd; border-left: 4px solid #FFD700; padding: 15px; margin: 20px 0;">
+              <p style="margin: 0;"><strong>📋 Important:</strong> Please present this email or your booking reference at reception during check-in.</p>
+            </div>
+            
+            <p style="text-align: center; margin-top: 30px;">
+              <strong>Contact us:</strong> +234-805-323-3660<br>
+              Email: info@smile-tcontinental.com
+            </p>
+          </div>
+          
+          <div style="background: #f5f5f5; padding: 20px; text-align: center; font-size: 12px; color: #666;">
+            <p>Thank you for choosing Smile-T Continental Hotel!</p>
+          </div>
+        </div>
+      `
+    };
+    
+    // Send email with 15-second timeout
+    await Promise.race([
+      transporter.sendMail(mailOptions),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Email timeout')), 15000)
+      )
+    ]);
+    
+    console.log('✅ Booking confirmation email sent to:', booking.guest_email);
+    return true;
+  } catch (error) {
+    console.error('❌ Error sending booking confirmation email:', error.message);
+    
+    // Log specific error types
+    if (error.code === 'EAUTH') {
+      console.error('❌ Email authentication failed - check credentials');
+    } else if (error.code === 'ETIMEDOUT' || error.message === 'Email timeout') {
+      console.error('❌ Email send timeout - SMTP server slow');
+    } else if (error.code === 'ECONNREFUSED') {
+      console.error('❌ Email server connection refused');
+    }
+    
+    // Don't throw error - email failure shouldn't break the booking flow
+    return false;
+  }
 }
 
 // GET all bookings (superadmin, supervisor, receptionist)
@@ -539,14 +629,22 @@ router.post('/', (req, res, next) => { console.log(`[${new Date().toISOString()}
     });
   }
   
-  // await sendBookingConfirmationEmail(data[0]); // Send email after successful booking
+  // ✅ ENABLED: Send confirmation email asynchronously (don't block response)
+  if (data && data[0]) {
+    setImmediate(() => {
+      sendBookingConfirmationEmail(data[0])
+        .then(() => console.log('✅ Staff booking confirmation email sent'))
+        .catch(err => console.error('❌ Staff booking email failed:', err.message));
+    });
+  }
+  
   res.status(201).json({ 
     success: true,
     booking: data[0], 
     base_total, 
     transaction_fee, 
     total_amount,
-    message: 'Booking created successfully'
+    message: 'Booking created successfully - confirmation email will be sent'
   });
 });
 
@@ -753,9 +851,24 @@ router.delete('/:id', requireRole(['superadmin']), async (req, res) => {
     
     // For ACTIVE bookings (not checked out), restore room availability
     // This is because the guest never actually occupied the room or it was cancelled
-    if (existingBooking.room_id && existingBooking.room_type_id) {
-      await restoreRoomToInventory(existingBooking.room_id, existingBooking.room_type_id);
-      console.log(`✅ Room restored after deleting active booking. Room Type: ${existingBooking.room_type_id}`);
+    
+    // ✅ FIX: Map UUID to room_type_id (bookings table doesn't have room_type_id column)
+    const UUID_TO_ROOM_TYPE = {
+      '11111111-1111-1111-1111-111111111111': 'classic-single',
+      '22222222-2222-2222-2222-222222222222': 'deluxe',
+      '33333333-3333-3333-3333-333333333333': 'deluxe-large',
+      '44444444-4444-4444-4444-444444444444': 'business-suite',
+      '55555555-5555-5555-5555-555555555555': 'executive-suite'
+    };
+    
+    if (existingBooking.room_id) {
+      const roomTypeId = UUID_TO_ROOM_TYPE[existingBooking.room_id];
+      if (roomTypeId) {
+        await restoreRoomToInventory(existingBooking.room_id, roomTypeId);
+        console.log(`✅ Room restored after deleting active booking. UUID: ${existingBooking.room_id} → Type: ${roomTypeId}`);
+      } else {
+        console.warn(`⚠️ Unknown room UUID: ${existingBooking.room_id} - cannot restore to inventory`);
+      }
     }
     
     console.warn(`⚠️ Booking permanently deleted: ${id} - Consider using status updates for audit trail`);

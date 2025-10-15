@@ -12,20 +12,42 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// Configure Zoho SMTP transporter for emails
+// Configure Email transporter (Gmail or Zoho)
 // Make transporter optional if email credentials are not configured
 let transporter = null;
-if (process.env.ZOHO_EMAIL && process.env.ZOHO_PASSWORD) {
-  transporter = nodemailer.createTransport({
-    host: 'smtp.zoho.com',
-    port: 465,
-    secure: true,
-    auth: {
-      user: process.env.ZOHO_EMAIL,
-      pass: process.env.ZOHO_PASSWORD
+if ((process.env.GMAIL_EMAIL && process.env.GMAIL_PASSWORD) || (process.env.ZOHO_EMAIL && process.env.ZOHO_PASSWORD)) {
+  try {
+    // Prefer Gmail (more reliable) over Zoho
+    if (process.env.GMAIL_EMAIL && process.env.GMAIL_PASSWORD) {
+      transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: process.env.GMAIL_EMAIL,
+          pass: process.env.GMAIL_PASSWORD
+        }
+      });
+      console.log('✅ Email transporter configured (Gmail)');
+    } else {
+      // Fallback to Zoho
+      transporter = nodemailer.createTransport({
+        host: 'smtp.zoho.com',
+        port: 587,
+        secure: false,
+        auth: {
+          user: process.env.ZOHO_EMAIL,
+          pass: process.env.ZOHO_PASSWORD
+        },
+        tls: {
+          ciphers: 'SSLv3',
+          rejectUnauthorized: false
+        }
+      });
+      console.log('✅ Email transporter configured (Zoho SMTP - Port 587)');
     }
-  });
-  console.log('✅ Email transporter configured');
+  } catch (err) {
+    console.error('❌ Error creating email transporter:', err.message);
+    transporter = null;
+  }
 } else {
   console.warn('⚠️ Email credentials not configured - emails will not be sent');
 }
@@ -50,8 +72,9 @@ async function sendBookingConfirmationEmail(booking) {
 
     const roomName = ROOM_TYPES[booking.room_id] || 'Room';
     
+    const senderEmail = process.env.GMAIL_EMAIL || process.env.ZOHO_EMAIL;
     const mailOptions = {
-      from: `Smile-T Continental Hotel <${process.env.ZOHO_EMAIL}>`,
+      from: `Smile-T Continental Hotel <${senderEmail}>`,
       to: booking.guest_email,
       subject: `✅ Booking Confirmation - ${booking.transaction_ref}`,
       html: `

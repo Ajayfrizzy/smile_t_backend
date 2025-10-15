@@ -52,11 +52,17 @@ if ((process.env.GMAIL_EMAIL && process.env.GMAIL_PASSWORD) || (process.env.ZOHO
   console.warn('⚠️ Email credentials not configured - emails will not be sent');
 }
 
-// Send booking confirmation email
+// Send booking confirmation email - OPTIMIZED with timeout
 async function sendBookingConfirmationEmail(booking) {
   // Skip if email not configured
   if (!transporter) {
     console.log('ℹ️ Email not configured - skipping confirmation email');
+    return false;
+  }
+  
+  // Validate booking data
+  if (!booking || !booking.guest_email) {
+    console.error('❌ Invalid booking data for email - missing guest_email');
     return false;
   }
   
@@ -171,7 +177,7 @@ async function sendBookingConfirmationEmail(booking) {
               <p style="text-align: center;">
                 <strong>Need to make changes?</strong><br>
                 Contact us: +234-805-323-3660<br>
-                Email: ${process.env.ZOHO_EMAIL}
+                Email: info@smile-tcontinental.com
               </p>
             </div>
             
@@ -188,11 +194,28 @@ async function sendBookingConfirmationEmail(booking) {
       `
     };
     
-    await transporter.sendMail(mailOptions);
+    // Send email with 15 second timeout
+    await Promise.race([
+      transporter.sendMail(mailOptions),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Email timeout')), 15000)
+      )
+    ]);
+    
     console.log('✅ Booking confirmation email sent to:', booking.guest_email);
     return true;
   } catch (error) {
-    console.error('❌ Error sending booking confirmation email:', error);
+    console.error('❌ Error sending booking confirmation email:', error.message);
+    
+    // Log specific error types
+    if (error.code === 'EAUTH') {
+      console.error('❌ Email authentication failed - check credentials');
+    } else if (error.code === 'ETIMEDOUT' || error.message === 'Email timeout') {
+      console.error('❌ Email send timeout - SMTP server slow');
+    } else if (error.code === 'ECONNREFUSED') {
+      console.error('❌ Email server connection refused');
+    }
+    
     // Don't throw error - email failure shouldn't break the booking flow
     return false;
   }
@@ -228,7 +251,7 @@ router.post('/initiate', async (req, res) => {
   }
 });
 
-// Verify payment
+// Verify payment - OPTIMIZED for speed
 router.post('/verify', async (req, res) => {
   const { tx_ref, transaction_id } = req.body;
   
@@ -252,7 +275,10 @@ router.post('/verify', async (req, res) => {
     
     const response = await axios.get(
       endpoint,
-      { headers: { Authorization: `Bearer ${FLW_SECRET_KEY}` } }
+      { 
+        headers: { Authorization: `Bearer ${FLW_SECRET_KEY}` },
+        timeout: 10000 // 10 second timeout
+      }
     );
     
     const { data } = response.data;
@@ -261,69 +287,71 @@ router.post('/verify', async (req, res) => {
     
     // Check if payment was successful
     if (data.status === 'successful') {
-      console.log('✅ Payment verified successfully, updating booking...');
+      console.log('✅ Payment verified successfully');
       
-      // Update booking status in database
-      try {
-        const { data: bookings, error: fetchError } = await supabase
-          .from('bookings')
-          .select('*')
-          .eq('transaction_ref', tx_ref)
-          .limit(1);
-
-        if (!fetchError && bookings && bookings.length > 0) {
-          const booking = bookings[0];
-          
-          console.log('📋 Booking found:', { 
-            id: booking.id, 
-            guest: booking.guest_name,
-            current_status: booking.payment_status 
-          });
-          
-          // Only update if not already confirmed (prevent duplicate emails)
-          if (booking.payment_status !== 'paid') {
-            // Update booking status to confirmed and paid
-            const { error: updateError } = await supabase
-              .from('bookings')
-              .update({
-                payment_status: 'paid',
-                status: 'confirmed',
-                updated_at: new Date().toISOString()
-              })
-              .eq('transaction_ref', tx_ref);
-
-            if (!updateError) {
-              console.log('✅ Booking status updated to confirmed for:', tx_ref);
-              
-              // Send confirmation email
-              console.log('📧 Attempting to send confirmation email...');
-              const emailSent = await sendBookingConfirmationEmail(booking);
-              if (emailSent) {
-                console.log('✅ Confirmation email sent successfully');
-              }
-            } else {
-              console.error('❌ Error updating booking status:', updateError);
-            }
-          } else {
-            console.log('ℹ️ Booking already confirmed, skipping update and email:', tx_ref);
-          }
-        } else {
-          console.warn('⚠️ Booking not found for transaction reference:', tx_ref);
-          if (fetchError) {
-            console.error('Database fetch error:', fetchError);
-          }
-        }
-      } catch (dbError) {
-        console.error('❌ Database error during booking update:', dbError);
-        // Continue - payment is verified, email is optional
-      }
-      
+      // RESPOND IMMEDIATELY to frontend (don't wait for DB/email)
+      // This makes the UX much faster
       res.json({ 
         success: true,
         status: 'success', 
         data: data,
         message: 'Payment verified successfully'
       });
+      
+      // Update booking status in background (after response sent)
+      setImmediate(async () => {
+        try {
+          const { data: bookings, error: fetchError } = await supabase
+            .from('bookings')
+            .select('*')
+            .eq('transaction_ref', tx_ref)
+            .single();
+
+          if (!fetchError && bookings) {
+            const booking = bookings;
+            
+            console.log('📋 Booking found:', { 
+              id: booking.id, 
+              guest: booking.guest_name,
+              current_status: booking.payment_status 
+            });
+            
+            // Only update if not already confirmed (prevent duplicate emails)
+            if (booking.payment_status !== 'paid') {
+              // Update booking status to confirmed and paid
+              const { error: updateError } = await supabase
+                .from('bookings')
+                .update({
+                  payment_status: 'paid',
+                  status: 'confirmed',
+                  updated_at: new Date().toISOString()
+                })
+                .eq('transaction_ref', tx_ref);
+
+              if (!updateError) {
+                console.log('✅ Booking status updated to confirmed for:', tx_ref);
+                
+                // Send confirmation email asynchronously (don't wait)
+                sendBookingConfirmationEmail(booking)
+                  .then(() => console.log('✅ Confirmation email sent successfully'))
+                  .catch(err => console.error('❌ Email send failed:', err.message));
+              } else {
+                console.error('❌ Error updating booking status:', updateError);
+              }
+            } else {
+              console.log('ℹ️ Booking already confirmed, skipping update:', tx_ref);
+            }
+          } else {
+            console.warn('⚠️ Booking not found for transaction reference:', tx_ref);
+            if (fetchError) {
+              console.error('Database fetch error:', fetchError);
+            }
+          }
+        } catch (dbError) {
+          console.error('❌ Background booking update error:', dbError);
+        }
+      });
+      
     } else {
       res.json({ 
         success: false,
@@ -333,11 +361,17 @@ router.post('/verify', async (req, res) => {
       });
     }
   } catch (err) {
-    console.error('Payment verification error:', err.response?.data || err.message);
+    console.error('❌ Payment verification error:', err.response?.data || err.message);
+    
+    // More detailed error response
+    const errorMessage = err.response?.data?.message || err.message || 'Unknown error';
+    const errorDetails = err.response?.data || {};
+    
     res.status(500).json({ 
       success: false,
-      error: err.response?.data?.message || err.message,
-      message: 'Payment verification failed'
+      error: errorMessage,
+      message: 'Payment verification failed - please contact support',
+      details: process.env.NODE_ENV === 'development' ? errorDetails : undefined
     });
   }
 });

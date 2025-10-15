@@ -110,13 +110,10 @@ try {
   app.use('/transactions', require('./routes/transactions'));
   
   // Payment routes
-  app.use('/payments', require('./routes/flutterwave'));
-  
-  // Alias for flutterwave verification (for backward compatibility)
-  app.post('/flutterwave-verify', async (req, res, next) => {
-    req.url = '/payments/verify';
-    app.handle(req, res, next);
-  });
+  const flutterwaveRoutes = require('./routes/flutterwave');
+  app.use('/payments', flutterwaveRoutes);
+  // Legacy endpoint - mount same router at old path for backward compatibility  
+  app.use('/flutterwave', flutterwaveRoutes);
   
   console.log(' All routes loaded successfully');
 } catch (error) {

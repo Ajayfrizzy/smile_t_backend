@@ -23,24 +23,54 @@ const { requireRole } = require('../middleware/auth');
 
 // Configure Email transporter (Gmail or Zoho)
 let transporter = null;
+let emailConfigured = false;
+
+// Check for email credentials
 if ((process.env.GMAIL_EMAIL && process.env.GMAIL_PASSWORD) || (process.env.ZOHO_EMAIL && process.env.ZOHO_PASSWORD)) {
   try {
     // Prefer Gmail (more reliable) over Zoho
     if (process.env.GMAIL_EMAIL && process.env.GMAIL_PASSWORD) {
+      console.log('🔍 Attempting to configure Gmail transporter...');
+      console.log('📧 Gmail Email:', process.env.GMAIL_EMAIL ? 'Set ✅' : 'Not set ❌');
+      console.log('🔑 Gmail Password:', process.env.GMAIL_PASSWORD ? 'Set ✅' : 'Not set ❌');
+      
       transporter = nodemailer.createTransport({
         service: 'gmail',
         auth: {
           user: process.env.GMAIL_EMAIL,
           pass: process.env.GMAIL_PASSWORD
+        },
+        // Add these options for better production compatibility
+        pool: true, // Use pooled connections
+        maxConnections: 5,
+        maxMessages: 100,
+        rateDelta: 1000,
+        rateLimit: 5
+      });
+      
+      // Verify the connection configuration
+      transporter.verify(function(error, success) {
+        if (error) {
+          console.error('❌ Gmail transporter verification failed:', error);
+          emailConfigured = false;
+          transporter = null;
+        } else {
+          console.log('✅ Gmail transporter verified and ready to send emails');
+          emailConfigured = true;
         }
       });
-      console.log('✅ Bookings email transporter configured (Gmail)');
+      
+      console.log('✅ Gmail transporter configured');
     } else {
       // Fallback to Zoho - CORRECTED PORT
+      console.log('🔍 Attempting to configure Zoho transporter...');
+      console.log('📧 Zoho Email:', process.env.ZOHO_EMAIL ? 'Set ✅' : 'Not set ❌');
+      console.log('🔑 Zoho Password:', process.env.ZOHO_PASSWORD ? 'Set ✅' : 'Not set ❌');
+      
       transporter = nodemailer.createTransport({
         host: 'smtp.zoho.com',
-        port: 587,              // ✅ FIXED: Use port 587 for TLS
-        secure: false,          // ✅ FIXED: false for port 587
+        port: 587,
+        secure: false,
         auth: {
           user: process.env.ZOHO_EMAIL,
           pass: process.env.ZOHO_PASSWORD
@@ -50,14 +80,33 @@ if ((process.env.GMAIL_EMAIL && process.env.GMAIL_PASSWORD) || (process.env.ZOHO
           rejectUnauthorized: false
         }
       });
-      console.log('✅ Bookings email transporter configured (Zoho SMTP - Port 587)');
+      
+      // Verify the connection configuration
+      transporter.verify(function(error, success) {
+        if (error) {
+          console.error('❌ Zoho transporter verification failed:', error);
+          emailConfigured = false;
+          transporter = null;
+        } else {
+          console.log('✅ Zoho transporter verified and ready to send emails');
+          emailConfigured = true;
+        }
+      });
+      
+      console.log('✅ Zoho transporter configured');
     }
   } catch (err) {
     console.error('❌ Error creating bookings email transporter:', err.message);
+    console.error('❌ Full error:', err);
     transporter = null;
+    emailConfigured = false;
   }
 } else {
   console.warn('⚠️ Email credentials not configured - booking emails will not be sent');
+  console.warn('⚠️ GMAIL_EMAIL:', process.env.GMAIL_EMAIL ? 'Set' : 'NOT SET');
+  console.warn('⚠️ GMAIL_PASSWORD:', process.env.GMAIL_PASSWORD ? 'Set' : 'NOT SET');
+  console.warn('⚠️ ZOHO_EMAIL:', process.env.ZOHO_EMAIL ? 'Set' : 'NOT SET');
+  console.warn('⚠️ ZOHO_PASSWORD:', process.env.ZOHO_PASSWORD ? 'Set' : 'NOT SET');
 }
 
 // Simple logging middleware
@@ -78,15 +127,22 @@ router.use(limiter);
 async function sendBookingConfirmationEmail(booking) {
   // Skip if email not configured
   if (!transporter) {
-    console.log('ℹ️ Email not configured - skipping booking confirmation email');
+    console.log('⚠️ Email transporter not initialized - skipping booking confirmation email');
+    console.log('⚠️ Check environment variables: GMAIL_EMAIL and GMAIL_PASSWORD must be set');
     return false;
   }
   
   // Validate booking data
   if (!booking || !booking.guest_email) {
     console.error('❌ Invalid booking data for email - missing guest_email');
+    console.error('❌ Booking data:', JSON.stringify(booking, null, 2));
     return false;
   }
+  
+  console.log(`📧 Attempting to send email to: ${booking.guest_email}`);
+  console.log(`📧 Booking ref: ${booking.transaction_ref}`);
+  console.log(`📧 Guest name: ${booking.guest_name}`);
+  console.log(`📧 Room: ${booking.room_name || 'Room'}`);
   
   try {
     const mailOptions = {
@@ -96,7 +152,16 @@ async function sendBookingConfirmationEmail(booking) {
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <div style="background: linear-gradient(135deg, #7B3F00 0%, #A0522D 100%); color: white; padding: 30px; text-align: center;">
-            <h1 style="margin: 0;">🏨 Smile-T Continental Hotel</h1>
+            <h1 style="margin: 0; display: flex; align-items: center; justify-content: center; gap: 15px;">
+              <svg width="48" height="48" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="display: inline-block; vertical-align: middle;">
+                <circle cx="50" cy="50" r="45" fill="#FFD700"/>
+                <path d="M30 60 Q50 40 70 60" stroke="#7B3F00" stroke-width="4" fill="none"/>
+                <circle cx="35" cy="45" r="3" fill="#7B3F00"/>
+                <circle cx="65" cy="45" r="3" fill="#7B3F00"/>
+                <path d="M40 70 Q50 75 60 70" stroke="#7B3F00" stroke-width="3" fill="none"/>
+              </svg>
+              <span style="display: inline-block; vertical-align: middle;">Smile-T Continental Hotel</span>
+            </h1>
             <p style="margin: 10px 0 0 0;">Booking Confirmation</p>
           </div>
           
@@ -129,26 +194,38 @@ async function sendBookingConfirmationEmail(booking) {
       `
     };
     
-    // Send email with 15-second timeout
+    // Send email with 20-second timeout (increased for production)
     await Promise.race([
       transporter.sendMail(mailOptions),
       new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Email timeout')), 15000)
+        setTimeout(() => reject(new Error('Email timeout')), 20000)
       )
     ]);
     
-    console.log('✅ Booking confirmation email sent to:', booking.guest_email);
+    console.log('✅ Booking confirmation email sent successfully to:', booking.guest_email);
+    console.log('✅ Email subject:', mailOptions.subject);
     return true;
   } catch (error) {
     console.error('❌ Error sending booking confirmation email:', error.message);
+    console.error('❌ Full error:', error);
+    console.error('❌ Error code:', error.code);
+    console.error('❌ Error stack:', error.stack);
     
-    // Log specific error types
+    // Log specific error types with actionable advice
     if (error.code === 'EAUTH') {
-      console.error('❌ Email authentication failed - check credentials');
+      console.error('❌ EAUTH: Email authentication failed');
+      console.error('💡 Solution: Check that GMAIL_EMAIL and GMAIL_PASSWORD are correct');
+      console.error('💡 For Gmail: Use an App Password, not your regular password');
+      console.error('💡 Generate App Password at: https://myaccount.google.com/apppasswords');
     } else if (error.code === 'ETIMEDOUT' || error.message === 'Email timeout') {
-      console.error('❌ Email send timeout - SMTP server slow');
+      console.error('❌ TIMEOUT: Email send timeout - SMTP server slow or unreachable');
+      console.error('💡 Solution: Check network connectivity and SMTP server status');
     } else if (error.code === 'ECONNREFUSED') {
-      console.error('❌ Email server connection refused');
+      console.error('❌ ECONNREFUSED: Email server connection refused');
+      console.error('💡 Solution: SMTP server may be down or blocked by firewall');
+    } else if (error.code === 'ESOCKET') {
+      console.error('❌ ESOCKET: Socket error - connection interrupted');
+      console.error('💡 Solution: Network issue or SMTP server disconnected');
     }
     
     // Don't throw error - email failure shouldn't break the booking flow
@@ -782,8 +859,15 @@ router.put('/:id', requireRole(['superadmin', 'receptionist']), async (req, res)
       });
     }
 
-    // STATUS-BASED ROOM RESTORATION
-    // If new status frees the room, restore it to inventory
+    // ===== STATUS-BASED ROOM RESTORATION =====
+    // NOTE: This system uses BOTH approaches for reliability:
+    // 1. MANUAL INCREMENT (this section): Updates available_rooms count in room_inventory table
+    // 2. DYNAMIC CALCULATION (room-inventory.js /dashboard endpoint): Calculates from active bookings
+    // 
+    // Why both? The dynamic calculation is the SOURCE OF TRUTH for dashboards,
+    // but we also increment/decrement for data consistency and backup.
+    // If dynamic calculation fails, manual count acts as fallback.
+    
     const wasRoomFreed = ROOM_FREEING_STATUSES.includes(existingBooking.status);
     const isRoomBeingFreed = ROOM_FREEING_STATUSES.includes(status);
     
@@ -793,6 +877,7 @@ router.put('/:id', requireRole(['superadmin', 'receptionist']), async (req, res)
       Old Status: ${existingBooking.status} (wasRoomFreed: ${wasRoomFreed})
       New Status: ${status} (isRoomBeingFreed: ${isRoomBeingFreed})
       ROOM_FREEING_STATUSES: ${JSON.stringify(ROOM_FREEING_STATUSES)}
+      Action: ${isRoomBeingFreed && !wasRoomFreed ? '✅ WILL RESTORE ROOM' : '❌ NO ACTION NEEDED'}
     `);
     
     if (isRoomBeingFreed && !wasRoomFreed) {
@@ -810,20 +895,27 @@ router.put('/:id', requireRole(['superadmin', 'receptionist']), async (req, res)
         console.log(`🔍 Room Type Mapping: ${existingBooking.room_id} → ${roomTypeId}`);
         
         if (roomTypeId) {
-          await restoreRoomToInventory(existingBooking.room_id, roomTypeId);
-          console.log(`✅ Room restored successfully: ${roomTypeId}`);
+          const restoreSuccess = await restoreRoomToInventory(existingBooking.room_id, roomTypeId);
+          if (restoreSuccess) {
+            console.log(`✅ Room manually restored to inventory: ${roomTypeId}`);
+            console.log(`ℹ️ Dashboard will also calculate dynamically (excluding ${status} bookings)`);
+          } else {
+            console.error(`❌ Manual room restoration failed for: ${roomTypeId}`);
+            console.log(`ℹ️ Dynamic calculation will still work correctly`);
+          }
         } else {
-          console.log(`❌ Room ID not found in UUID_TO_ROOM_TYPE mapping!`);
+          console.error(`❌ Room ID not found in UUID_TO_ROOM_TYPE mapping: ${existingBooking.room_id}`);
         }
       } catch (roomError) {
         console.error('❌ Error restoring room availability:', roomError);
+        console.log(`ℹ️ Dynamic availability calculation will still work correctly`);
         // Don't fail the status update for this
       }
     } else if (wasRoomFreed && !isRoomBeingFreed) {
       // Room was freed but now being taken back (fixing a mistake)
       console.log(`⚠️ Warning: Changing from ${existingBooking.status} to ${status} - room may need manual inventory adjustment`);
     } else {
-      console.log(`ℹ️ No room restoration needed (condition not met)`);
+      console.log(`ℹ️ No room restoration needed (wasRoomFreed=${wasRoomFreed}, isRoomBeingFreed=${isRoomBeingFreed})`);
     }
 
     // Determine appropriate success message based on status

@@ -247,17 +247,20 @@ router.get('/dashboard', requireRole(['superadmin', 'supervisor', 'receptionist'
       'executive-suite': '55555555-5555-5555-5555-555555555555'
     };
 
+    // Statuses that free up rooms (must match bookings.js ROOM_FREEING_STATUSES)
+    const ROOM_FREEING_STATUSES = ['checked_out', 'completed', 'cancelled', 'no_show', 'voided'];
+
     // Calculate real-time availability for each room type
     const enhancedData = await Promise.all((inventoryData || []).map(async (inventory) => {
       const roomUuid = ROOM_TYPE_UUIDS[inventory.room_type_id];
       
       if (roomUuid) {
-        // Get current active bookings for this room type
+        // Get current ACTIVE bookings (exclude all room-freeing statuses)
         const { data: activeBookings, error: bookingsError } = await supabase
           .from('bookings')
           .select('*')
           .eq('room_id', roomUuid)
-          .not('status', 'eq', 'cancelled')
+          .not('status', 'in', `(${ROOM_FREEING_STATUSES.join(',')})`) // Exclude all room-freeing statuses
           .gte('check_out', new Date().toISOString().split('T')[0]); // Future or current bookings
 
         if (!bookingsError) {
@@ -265,10 +268,10 @@ router.get('/dashboard', requireRole(['superadmin', 'supervisor', 'receptionist'
           const dynamicAvailableRooms = Math.max(0, inventory.total_rooms - bookedRooms);
           
           // Debug logging
-          console.log(`Dynamic availability for ${inventory.room_type_id}:`);
-          console.log(`- Total rooms: ${inventory.total_rooms}`);  
-          console.log(`- Active bookings: ${bookedRooms}`);
-          console.log(`- Available rooms: ${dynamicAvailableRooms}`);
+          console.log(`✅ Dynamic availability for ${inventory.room_type_id}:`);
+          console.log(`  - Total rooms: ${inventory.total_rooms}`);  
+          console.log(`  - Active bookings (excluding ${ROOM_FREEING_STATUSES.join(', ')}): ${bookedRooms}`);
+          console.log(`  - Available rooms: ${dynamicAvailableRooms}`);
           
           return {
             ...inventory,

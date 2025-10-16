@@ -159,7 +159,12 @@ async function sendBookingConfirmationEmail(booking) {
 // GET all bookings (superadmin, supervisor, receptionist)
 router.get('/', requireRole(['superadmin', 'supervisor', 'receptionist']), async (req, res) => {
   try {
-    const { data: bookings, error } = await supabase.from('bookings').select('*');
+    // Fetch bookings ordered by creation date (newest first)
+    const { data: bookings, error } = await supabase
+      .from('bookings')
+      .select('*')
+      .order('created_at', { ascending: false });
+      
     if (error) {
       console.error('Bookings fetch error:', error);
       return res.status(500).json({ success: false, message: error.message });
@@ -428,6 +433,20 @@ router.post('/public', async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
   
+  // ✅ Send confirmation email asynchronously for public bookings
+  if (data && data[0]) {
+    const bookingWithRoomInfo = {
+      ...data[0],
+      room_name: roomType.room_type // Add room type name for email
+    };
+    
+    setImmediate(() => {
+      sendBookingConfirmationEmail(bookingWithRoomInfo)
+        .then(() => console.log('✅ Public booking confirmation email sent to:', guest_email))
+        .catch(err => console.error('❌ Public booking email failed:', err.message));
+    });
+  }
+  
   res.status(201).json({ booking: data[0], base_total, transaction_fee, total_amount });
 });
 
@@ -631,9 +650,14 @@ router.post('/', (req, res, next) => { console.log(`[${new Date().toISOString()}
   
   // ✅ ENABLED: Send confirmation email asynchronously (don't block response)
   if (data && data[0]) {
+    const bookingWithRoomInfo = {
+      ...data[0],
+      room_name: roomType.room_type // Add room type name for email
+    };
+    
     setImmediate(() => {
-      sendBookingConfirmationEmail(data[0])
-        .then(() => console.log('✅ Staff booking confirmation email sent'))
+      sendBookingConfirmationEmail(bookingWithRoomInfo)
+        .then(() => console.log('✅ Staff booking confirmation email sent to:', guest_email))
         .catch(err => console.error('❌ Staff booking email failed:', err.message));
     });
   }

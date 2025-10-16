@@ -661,6 +661,8 @@ const ROOM_FREEING_STATUSES = [
 
 // Helper function to restore room to inventory
 async function restoreRoomToInventory(roomId, roomTypeId) {
+  console.log(`🔧 restoreRoomToInventory called with: roomId=${roomId}, roomTypeId=${roomTypeId}`);
+  
   try {
     const { data: currentInventory, error: fetchInventoryError } = await supabase
       .from('room_inventory')
@@ -669,16 +671,20 @@ async function restoreRoomToInventory(roomId, roomTypeId) {
       .single();
 
     if (fetchInventoryError) {
-      console.error('Failed to fetch room inventory:', fetchInventoryError);
+      console.error('❌ Failed to fetch room inventory:', fetchInventoryError);
       return false;
     }
 
     if (currentInventory) {
+      console.log(`📊 Current inventory for ${roomTypeId}: ${currentInventory.available_rooms}/${currentInventory.total_rooms}`);
+      
       // Increase available room count by 1, but don't exceed total_rooms
       const newAvailableRooms = Math.min(
         (currentInventory.available_rooms || 0) + 1,
         currentInventory.total_rooms || 0
       );
+
+      console.log(`📊 New available rooms will be: ${newAvailableRooms}`);
 
       const { error: inventoryError } = await supabase
         .from('room_inventory')
@@ -689,15 +695,17 @@ async function restoreRoomToInventory(roomId, roomTypeId) {
         .eq('room_type_id', roomTypeId);
 
       if (inventoryError) {
-        console.error('Failed to restore room availability:', inventoryError);
+        console.error('❌ Failed to restore room availability:', inventoryError);
         return false;
       }
 
-      console.log(`✅ Room restored: ${roomTypeId} → ${newAvailableRooms} available`);
+      console.log(`✅ Room restored successfully: ${roomTypeId} → ${newAvailableRooms} available`);
       return true;
+    } else {
+      console.log(`❌ No inventory found for room type: ${roomTypeId}`);
     }
   } catch (error) {
-    console.error('Error restoring room availability:', error);
+    console.error('❌ Error in restoreRoomToInventory:', error);
     return false;
   }
   return false;
@@ -755,6 +763,14 @@ router.put('/:id', requireRole(['superadmin', 'receptionist']), async (req, res)
     const wasRoomFreed = ROOM_FREEING_STATUSES.includes(existingBooking.status);
     const isRoomBeingFreed = ROOM_FREEING_STATUSES.includes(status);
     
+    console.log(`🔍 Room Restoration Debug:
+      Booking ID: ${id}
+      Room ID: ${existingBooking.room_id}
+      Old Status: ${existingBooking.status} (wasRoomFreed: ${wasRoomFreed})
+      New Status: ${status} (isRoomBeingFreed: ${isRoomBeingFreed})
+      ROOM_FREEING_STATUSES: ${JSON.stringify(ROOM_FREEING_STATUSES)}
+    `);
+    
     if (isRoomBeingFreed && !wasRoomFreed) {
       // Room is being freed for the first time
       try {
@@ -767,17 +783,23 @@ router.put('/:id', requireRole(['superadmin', 'receptionist']), async (req, res)
         };
 
         const roomTypeId = UUID_TO_ROOM_TYPE[existingBooking.room_id];
+        console.log(`🔍 Room Type Mapping: ${existingBooking.room_id} → ${roomTypeId}`);
+        
         if (roomTypeId) {
           await restoreRoomToInventory(existingBooking.room_id, roomTypeId);
-          console.log(`📊 Status changed: ${existingBooking.status} → ${status} | Room freed ✅`);
+          console.log(`✅ Room restored successfully: ${roomTypeId}`);
+        } else {
+          console.log(`❌ Room ID not found in UUID_TO_ROOM_TYPE mapping!`);
         }
       } catch (roomError) {
-        console.error('Error restoring room availability:', roomError);
+        console.error('❌ Error restoring room availability:', roomError);
         // Don't fail the status update for this
       }
     } else if (wasRoomFreed && !isRoomBeingFreed) {
       // Room was freed but now being taken back (fixing a mistake)
       console.log(`⚠️ Warning: Changing from ${existingBooking.status} to ${status} - room may need manual inventory adjustment`);
+    } else {
+      console.log(`ℹ️ No room restoration needed (condition not met)`);
     }
 
     // Determine appropriate success message based on status

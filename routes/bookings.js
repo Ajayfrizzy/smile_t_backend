@@ -51,14 +51,18 @@ async function initializeEmailTransporter() {
       maxConnections: 5,
       maxMessages: 100,
       rateDelta: 1000,
-      rateLimit: 5
+      rateLimit: 5,
+      // Production-ready timeouts
+      connectionTimeout: 30000, // 30 seconds
+      greetingTimeout: 30000,
+      socketTimeout: 60000 // 60 seconds for sending
     });
     
     try {
-      // Verify with timeout (10 seconds)
+      // Verify with timeout (5 seconds) - quick check
       await Promise.race([
         gmailTransporter.verify(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Verification timeout')), 10000))
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Verification timeout')), 5000))
       ]);
       
       console.log('✅ Gmail transporter verified and ready to send emails');
@@ -67,49 +71,65 @@ async function initializeEmailTransporter() {
       activeEmailProvider = 'gmail';
       return;
     } catch (error) {
-      console.error('Gmail transporter verification failed:', error.message);
+      console.warn('⚠️ Gmail verification failed:', error.message);
+      console.log('📧 Configuring Gmail anyway - emails may still work (verification can fail on restrictive hosts)');
+      
+      // IMPORTANT: Configure anyway - verification can fail but sending may work
+      transporter = gmailTransporter;
+      emailConfigured = true;
+      activeEmailProvider = 'gmail';
+      return;
     }
   }
   
-  // Fallback to Zoho if Gmail fails or not configured
+  // Fallback to Zoho if Gmail not configured
   if (process.env.ZOHO_EMAIL && process.env.ZOHO_PASSWORD) {
-    console.log('Attempting to configure Zoho transporter (fallback)...');
+    console.log('🔍 Attempting to configure Zoho transporter (fallback)...');
+    console.log('📧 Zoho Email:', process.env.ZOHO_EMAIL ? 'Set ✅' : 'Not set ❌');
+    console.log('🔑 Zoho Password:', process.env.ZOHO_PASSWORD ? 'Set ✅' : 'Not set ❌');
     
     const zohoTransporter = nodemailer.createTransport({
       host: 'smtp.zoho.com',
-      port: 587,
-      secure: true, // true for 465, false for other ports
+      port: 465, // SSL port
+      secure: true,
       auth: {
         user: process.env.ZOHO_EMAIL,
         pass: process.env.ZOHO_PASSWORD
       },
       pool: true,
       maxConnections: 3,
-      connectionTimeout: 10000,
-      greetingTimeout: 5000
+      connectionTimeout: 30000,
+      greetingTimeout: 30000,
+      socketTimeout: 60000
     });
     
     try {
-      // Verify with timeout (10 seconds)
+      // Verify with timeout (5 seconds)
       await Promise.race([
         zohoTransporter.verify(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Verification timeout')), 10000))
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Verification timeout')), 5000))
       ]);
       
-      console.log('Zoho transporter verified and ready to send emails');
+      console.log('✅ Zoho transporter verified and ready to send emails');
       transporter = zohoTransporter;
       emailConfigured = true;
       activeEmailProvider = 'zoho';
       return;
     } catch (error) {
-      console.error('Zoho transporter verification failed:', error.message);
+      console.warn('⚠️ Zoho verification failed:', error.message);
+      console.log('📧 Configuring Zoho anyway - emails may still work (verification can fail on restrictive hosts)');
+      
+      // IMPORTANT: Configure anyway
+      transporter = zohoTransporter;
+      emailConfigured = true;
+      activeEmailProvider = 'zoho';
+      return;
     }
   }
   
-  // If we reach here, both failed
-  console.error('CRITICAL: All email transporters failed to verify');
-  console.error('Email notifications will NOT work in production');
-
+  // If we reach here, no credentials provided
+  console.error('❌ CRITICAL: No email credentials provided');
+  console.log('📧 Set GMAIL_EMAIL + GMAIL_PASSWORD or ZOHO_EMAIL + ZOHO_PASSWORD');
 }
 
 // Initialize email transporter (non-blocking)

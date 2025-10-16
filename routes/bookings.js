@@ -24,90 +24,111 @@ const { requireRole } = require('../middleware/auth');
 // Configure Email transporter (Gmail or Zoho)
 let transporter = null;
 let emailConfigured = false;
+let activeEmailProvider = 'none';
 
-// Check for email credentials
-if ((process.env.GMAIL_EMAIL && process.env.GMAIL_PASSWORD) || (process.env.ZOHO_EMAIL && process.env.ZOHO_PASSWORD)) {
-  try {
-    // Prefer Gmail (more reliable) over Zoho
-    if (process.env.GMAIL_EMAIL && process.env.GMAIL_PASSWORD) {
-      console.log('🔍 Attempting to configure Gmail transporter...');
-      console.log('📧 Gmail Email:', process.env.GMAIL_EMAIL ? 'Set ✅' : 'Not set ❌');
-      console.log('🔑 Gmail Password:', process.env.GMAIL_PASSWORD ? 'Set ✅' : 'Not set ❌');
-      
-      transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: {
-          user: process.env.GMAIL_EMAIL,
-          pass: process.env.GMAIL_PASSWORD
-        },
-        // Add these options for better production compatibility
-        pool: true, // Use pooled connections
-        maxConnections: 5,
-        maxMessages: 100,
-        rateDelta: 1000,
-        rateLimit: 5
-      });
-      
-      // Verify the connection configuration
-      transporter.verify(function(error, success) {
-        if (error) {
-          console.error('❌ Gmail transporter verification failed:', error);
-          emailConfigured = false;
-          transporter = null;
-        } else {
-          console.log('✅ Gmail transporter verified and ready to send emails');
-          emailConfigured = true;
-        }
-      });
-      
-      console.log('✅ Gmail transporter configured');
-    } else {
-      // Fallback to Zoho - CORRECTED PORT
-      console.log('🔍 Attempting to configure Zoho transporter...');
-      console.log('📧 Zoho Email:', process.env.ZOHO_EMAIL ? 'Set ✅' : 'Not set ❌');
-      console.log('🔑 Zoho Password:', process.env.ZOHO_PASSWORD ? 'Set ✅' : 'Not set ❌');
-      
-      transporter = nodemailer.createTransport({
-        host: 'smtp.zoho.com',
-        port: 587,
-        secure: false,
-        auth: {
-          user: process.env.ZOHO_EMAIL,
-          pass: process.env.ZOHO_PASSWORD
-        },
-        tls: {
-          ciphers: 'SSLv3',
-          rejectUnauthorized: false
-        }
-      });
-      
-      // Verify the connection configuration
-      transporter.verify(function(error, success) {
-        if (error) {
-          console.error('❌ Zoho transporter verification failed:', error);
-          emailConfigured = false;
-          transporter = null;
-        } else {
-          console.log('✅ Zoho transporter verified and ready to send emails');
-          emailConfigured = true;
-        }
-      });
-      
-      console.log('✅ Zoho transporter configured');
-    }
-  } catch (err) {
-    console.error('❌ Error creating bookings email transporter:', err.message);
-    console.error('❌ Full error:', err);
-    transporter = null;
-    emailConfigured = false;
+// CRITICAL: Async email verification with timeout and fallback
+async function initializeEmailTransporter() {
+  // Check for email credentials
+  if (!process.env.GMAIL_EMAIL && !process.env.ZOHO_EMAIL) {
+    console.warn('⚠️ Email not configured - missing credentials');
+    console.log('To enable emails, set GMAIL_EMAIL + GMAIL_PASSWORD or ZOHO_EMAIL + ZOHO_PASSWORD');
+    return;
   }
-} else {
-  console.warn('⚠️ Email credentials not configured - booking emails will not be sent');
-  console.warn('⚠️ GMAIL_EMAIL:', process.env.GMAIL_EMAIL ? 'Set' : 'NOT SET');
-  console.warn('⚠️ GMAIL_PASSWORD:', process.env.GMAIL_PASSWORD ? 'Set' : 'NOT SET');
-  console.warn('⚠️ ZOHO_EMAIL:', process.env.ZOHO_EMAIL ? 'Set' : 'NOT SET');
-  console.warn('⚠️ ZOHO_PASSWORD:', process.env.ZOHO_PASSWORD ? 'Set' : 'NOT SET');
+
+  // Try Gmail first (most reliable, especially on restrictive hosting platforms like Render.com)
+  if (process.env.GMAIL_EMAIL && process.env.GMAIL_PASSWORD) {
+    console.log('🔍 Attempting to configure Gmail transporter...');
+    console.log('📧 Gmail Email:', process.env.GMAIL_EMAIL ? 'Set ✅' : 'Not set ❌');
+    console.log('🔑 Gmail Password:', process.env.GMAIL_PASSWORD ? 'Set ✅' : 'Not set ❌');
+    
+    const gmailTransporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.GMAIL_EMAIL,
+        pass: process.env.GMAIL_PASSWORD
+      },
+      pool: true,
+      maxConnections: 5,
+      maxMessages: 100,
+      rateDelta: 1000,
+      rateLimit: 5
+    });
+    
+    try {
+      // Verify with timeout (10 seconds)
+      await Promise.race([
+        gmailTransporter.verify(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Verification timeout')), 10000))
+      ]);
+      
+      console.log('✅ Gmail transporter verified and ready to send emails');
+      transporter = gmailTransporter;
+      emailConfigured = true;
+      activeEmailProvider = 'gmail';
+      return;
+    } catch (error) {
+      console.error('❌ Gmail transporter verification failed:', error.message);
+      console.log('💡 Tip: For Gmail, ensure you are using an App Password (not regular password)');
+      console.log('💡 Generate at: https://myaccount.google.com/apppasswords');
+    }
+  }
+  
+  // Fallback to Zoho if Gmail fails or not configured
+  if (process.env.ZOHO_EMAIL && process.env.ZOHO_PASSWORD) {
+    console.log('🔍 Attempting to configure Zoho transporter (fallback)...');
+    console.log('📧 Zoho Email:', process.env.ZOHO_EMAIL ? 'Set ✅' : 'Not set ❌');
+    console.log('🔑 Zoho Password:', process.env.ZOHO_PASSWORD ? 'Set ✅' : 'Not set ❌');
+    
+    const zohoTransporter = nodemailer.createTransport({
+      host: 'smtp.zoho.com',
+      port: 465, // SSL port (more reliable on restrictive hosting like Render.com)
+      secure: true, // true for 465, false for other ports
+      auth: {
+        user: process.env.ZOHO_EMAIL,
+        pass: process.env.ZOHO_PASSWORD
+      },
+      pool: true,
+      maxConnections: 3,
+      connectionTimeout: 10000,
+      greetingTimeout: 5000
+    });
+    
+    try {
+      // Verify with timeout (10 seconds)
+      await Promise.race([
+        zohoTransporter.verify(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Verification timeout')), 10000))
+      ]);
+      
+      console.log('✅ Zoho transporter verified and ready to send emails');
+      transporter = zohoTransporter;
+      emailConfigured = true;
+      activeEmailProvider = 'zoho';
+      return;
+    } catch (error) {
+      console.error('❌ Zoho transporter verification failed:', error.message);
+      console.log('💡 Tip: Zoho may be blocked by hosting firewall (Render.com often blocks SMTP)');
+      console.log('💡 Recommendation: Use Gmail App Password instead');
+    }
+  }
+  
+  // If we reach here, both failed
+  console.error('❌ CRITICAL: All email transporters failed to verify');
+  console.error('❌ Email notifications will NOT work in production');
+  console.log('');
+  console.log('🔧 TROUBLESHOOTING:');
+  console.log('  1. RECOMMENDED: Use Gmail with App Password');
+  console.log('     - Generate at: https://myaccount.google.com/apppasswords');
+  console.log('     - Set GMAIL_EMAIL and GMAIL_PASSWORD in environment variables');
+  console.log('  2. Check hosting firewall settings (Render.com may block SMTP ports)');
+  console.log('  3. Consider using SendGrid or other transactional email service');
+  console.log('');
 }
+
+// Initialize email transporter (non-blocking)
+initializeEmailTransporter().catch(error => {
+  console.error('❌ Fatal error initializing email:', error);
+});
 
 // Simple logging middleware
 router.use((req, res, next) => {
@@ -126,9 +147,10 @@ router.use(limiter);
 // Send booking confirmation email - with timeout protection
 async function sendBookingConfirmationEmail(booking) {
   // Skip if email not configured
-  if (!transporter) {
-    console.log('⚠️ Email transporter not initialized - skipping booking confirmation email');
-    console.log('⚠️ Check environment variables: GMAIL_EMAIL and GMAIL_PASSWORD must be set');
+  if (!emailConfigured || !transporter) {
+    console.log('⚠️ Email transporter not configured - skipping booking confirmation email');
+    console.log('⚠️ Check server logs for email initialization errors');
+    console.log('⚠️ Ensure GMAIL_EMAIL and GMAIL_PASSWORD are set in environment variables');
     return false;
   }
   
@@ -139,7 +161,7 @@ async function sendBookingConfirmationEmail(booking) {
     return false;
   }
   
-  console.log(`📧 Attempting to send email to: ${booking.guest_email}`);
+  console.log(`📧 Sending email via ${activeEmailProvider.toUpperCase()} to: ${booking.guest_email}`);
   console.log(`📧 Booking ref: ${booking.transaction_ref}`);
   console.log(`📧 Guest name: ${booking.guest_name}`);
   console.log(`📧 Room: ${booking.room_name || 'Room'}`);
@@ -202,11 +224,12 @@ async function sendBookingConfirmationEmail(booking) {
       )
     ]);
     
-    console.log('✅ Booking confirmation email sent successfully to:', booking.guest_email);
-    console.log('✅ Email subject:', mailOptions.subject);
+    console.log(`✅ Booking confirmation email sent successfully via ${activeEmailProvider.toUpperCase()}`);
+    console.log(`✅ Recipient: ${booking.guest_email}`);
+    console.log(`✅ Subject: ${mailOptions.subject}`);
     return true;
   } catch (error) {
-    console.error('❌ Error sending booking confirmation email:', error.message);
+    console.error(`❌ Error sending booking confirmation email via ${activeEmailProvider}:`, error.message);
     console.error('❌ Full error:', error);
     console.error('❌ Error code:', error.code);
     console.error('❌ Error stack:', error.stack);

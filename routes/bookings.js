@@ -67,21 +67,17 @@ async function initializeEmailTransporter() {
       activeEmailProvider = 'gmail';
       return;
     } catch (error) {
-      console.error('❌ Gmail transporter verification failed:', error.message);
-      console.log('💡 Tip: For Gmail, ensure you are using an App Password (not regular password)');
-      console.log('💡 Generate at: https://myaccount.google.com/apppasswords');
+      console.error('Gmail transporter verification failed:', error.message);
     }
   }
   
   // Fallback to Zoho if Gmail fails or not configured
   if (process.env.ZOHO_EMAIL && process.env.ZOHO_PASSWORD) {
-    console.log('🔍 Attempting to configure Zoho transporter (fallback)...');
-    console.log('📧 Zoho Email:', process.env.ZOHO_EMAIL ? 'Set ✅' : 'Not set ❌');
-    console.log('🔑 Zoho Password:', process.env.ZOHO_PASSWORD ? 'Set ✅' : 'Not set ❌');
+    console.log('Attempting to configure Zoho transporter (fallback)...');
     
     const zohoTransporter = nodemailer.createTransport({
       host: 'smtp.zoho.com',
-      port: 465, // SSL port (more reliable on restrictive hosting like Render.com)
+      port: 587,
       secure: true, // true for 465, false for other ports
       auth: {
         user: process.env.ZOHO_EMAIL,
@@ -100,29 +96,20 @@ async function initializeEmailTransporter() {
         new Promise((_, reject) => setTimeout(() => reject(new Error('Verification timeout')), 10000))
       ]);
       
-      console.log('✅ Zoho transporter verified and ready to send emails');
+      console.log('Zoho transporter verified and ready to send emails');
       transporter = zohoTransporter;
       emailConfigured = true;
       activeEmailProvider = 'zoho';
       return;
     } catch (error) {
-      console.error('❌ Zoho transporter verification failed:', error.message);
-      console.log('💡 Tip: Zoho may be blocked by hosting firewall (Render.com often blocks SMTP)');
-      console.log('💡 Recommendation: Use Gmail App Password instead');
+      console.error('Zoho transporter verification failed:', error.message);
     }
   }
   
   // If we reach here, both failed
-  console.error('❌ CRITICAL: All email transporters failed to verify');
-  console.error('❌ Email notifications will NOT work in production');
-  console.log('');
-  console.log('🔧 TROUBLESHOOTING:');
-  console.log('  1. RECOMMENDED: Use Gmail with App Password');
-  console.log('     - Generate at: https://myaccount.google.com/apppasswords');
-  console.log('     - Set GMAIL_EMAIL and GMAIL_PASSWORD in environment variables');
-  console.log('  2. Check hosting firewall settings (Render.com may block SMTP ports)');
-  console.log('  3. Consider using SendGrid or other transactional email service');
-  console.log('');
+  console.error('CRITICAL: All email transporters failed to verify');
+  console.error('Email notifications will NOT work in production');
+
 }
 
 // Initialize email transporter (non-blocking)

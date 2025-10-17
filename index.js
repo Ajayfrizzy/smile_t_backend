@@ -109,13 +109,16 @@ try {
   // Transactions routes
   app.use('/transactions', require('./routes/transactions'));
   
+  // Analytics routes
+  app.use('/analytics', require('./routes/analytics'));
+  
   // Payment routes
   const flutterwaveRoutes = require('./routes/flutterwave');
   app.use('/payments', flutterwaveRoutes);
   // Legacy endpoint - mount same router at old path for backward compatibility  
   app.use('/flutterwave', flutterwaveRoutes);
   
-  console.log(' All routes loaded successfully');
+  console.log('✅ All routes loaded successfully');
 } catch (error) {
   console.error(' Error loading routes:', error.message);
 }

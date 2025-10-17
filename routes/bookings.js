@@ -181,15 +181,8 @@ async function sendBookingConfirmationEmail(booking) {
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <div style="background: linear-gradient(135deg, #7B3F00 0%, #A0522D 100%); color: white; padding: 30px; text-align: center;">
-            <h1 style="margin: 0; display: flex; align-items: center; justify-content: center; gap: 15px;">
-              <svg width="48" height="48" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="display: inline-block; vertical-align: middle;">
-                <circle cx="50" cy="50" r="45" fill="#FFD700"/>
-                <path d="M30 60 Q50 40 70 60" stroke="#7B3F00" stroke-width="4" fill="none"/>
-                <circle cx="35" cy="45" r="3" fill="#7B3F00"/>
-                <circle cx="65" cy="45" r="3" fill="#7B3F00"/>
-                <path d="M40 70 Q50 75 60 70" stroke="#7B3F00" stroke-width="3" fill="none"/>
-              </svg>
-              <span style="display: inline-block; vertical-align: middle;">Smile-T Continental Hotel</span>
+            <h1 style="margin: 5px auto 10px;">
+              Smile-T Continental Hotel
             </h1>
             <p style="margin: 10px 0 0 0;">Booking Confirmation</p>
           </div>

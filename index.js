@@ -3,12 +3,17 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const compression = require('compression');
+const cookieParser = require('cookie-parser');
+const csrf = require('csurf');
 require('dotenv').config();
 
 const app = express();
 
 // Enable compression
 app.use(compression());
+
+// Cookie parser (must be before CSRF)
+app.use(cookieParser());
 
 // Security middleware
 app.use(helmet({
@@ -43,7 +48,7 @@ app.use(cors({
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept', 'X-Requested-With'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept', 'X-Requested-With', 'X-CSRF-Token'],
   exposedHeaders: ['Content-Range', 'X-Content-Range']
 }));
 
@@ -66,6 +71,22 @@ app.use(limiter);
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// CSRF Protection (cookie-based)
+const csrfProtection = csrf({ 
+  cookie: {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict'
+  } 
+});
+
+// CSRF token endpoint (no protection needed for getting the token)
+app.get('/csrf-token', (req, res) => {
+  // Generate a new CSRF token
+  const token = req.csrfToken ? req.csrfToken() : null;
+  res.json({ csrfToken: token || 'development-token' });
+});
 
 // Request logging middleware
 app.use((req, res, next) => {

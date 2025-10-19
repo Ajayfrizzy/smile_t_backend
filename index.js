@@ -42,9 +42,7 @@ app.use(cors({
     'http://localhost:5173',
     'https://smile-t-continental.vercel.app',
     'https://smile-tcontinental.com',
-    'https://www.smile-tcontinental.com',
-    'http://smile-tcontinental.com',
-    'http://www.smile-tcontinental.com'
+    'https://www.smile-tcontinental.com'
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],

@@ -60,8 +60,20 @@ app.use(cors({
     }
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept', 'X-Requested-With', 'X-CSRF-Token'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH', 'HEAD'],
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'Origin', 
+    'Accept', 
+    'X-Requested-With', 
+    'X-CSRF-Token',
+    'Cache-Control',
+    'Pragma',
+    'Expires',
+    'If-None-Match',
+    'If-Modified-Since'
+  ],
   exposedHeaders: ['Content-Range', 'X-Content-Range', 'Set-Cookie'],
   preflightContinue: false,
   optionsSuccessStatus: 204

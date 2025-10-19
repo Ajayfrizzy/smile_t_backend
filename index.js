@@ -104,15 +104,15 @@ const csrfProtection = csrf({
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict'
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict'
   } 
 });
 
 // CSRF token endpoint (no protection needed for getting the token)
-app.get('/csrf-token', (req, res) => {
-  // Generate a new CSRF token
-  const token = req.csrfToken ? req.csrfToken() : null;
-  res.json({ csrfToken: token || 'development-token' });
+// This must be placed BEFORE csrfProtection middleware is applied
+app.get('/auth/csrf-token', csrfProtection, (req, res) => {
+  // Generate and send the CSRF token
+  res.json({ csrfToken: req.csrfToken() });
 });
 
 // Request logging middleware
@@ -168,7 +168,7 @@ try {
   
   console.log('✅ All routes loaded successfully');
 } catch (error) {
-  console.error(' Error loading routes:', error.message);
+  console.error('❌ Error loading routes:', error.message);
 }
 
 // Error handling middleware

@@ -174,7 +174,47 @@ router.delete('/:id', (req, res, next) => { console.log(`[${new Date().toISOStri
   try {
     const { id } = req.params;
     
-    const { data, error } = await supabase.from('staff').delete().eq('id', id).select();
+    // Check if staff has related records (bar sales, bookings, etc.)
+    const { data: barSales, error: barSalesError } = await supabase
+      .from('bar_sales')
+      .select('id')
+      .eq('staff_id', id)
+      .limit(1);
+    
+    const { data: bookings, error: bookingsError } = await supabase
+      .from('bookings')
+      .select('id')
+      .eq('created_by', id)
+      .limit(1);
+    
+    // If staff has related records, deactivate instead of deleting
+    if ((barSales && barSales.length > 0) || (bookings && bookings.length > 0)) {
+      const { data, error } = await supabase
+        .from('staff')
+        .update({ is_active: false })
+        .eq('id', id)
+        .select();
+      
+      if (error) {
+        return res.status(500).json({ 
+          success: false, 
+          message: error.message 
+        });
+      }
+      
+      return res.json({
+        success: true,
+        data: data[0],
+        message: 'Staff member deactivated successfully (has related records)'
+      });
+    }
+    
+    // If no related records, safe to delete
+    const { data, error } = await supabase
+      .from('staff')
+      .delete()
+      .eq('id', id)
+      .select();
     
     if (error) {
       return res.status(500).json({ 
@@ -192,7 +232,7 @@ router.delete('/:id', (req, res, next) => { console.log(`[${new Date().toISOStri
     console.error('Delete staff error:', error);
     res.status(500).json({ 
       success: false, 
-      message: 'Internal server error' 
+      message: 'Internal server error: ' + error.message 
     });
   }
 });

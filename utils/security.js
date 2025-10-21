@@ -264,13 +264,18 @@ const verify2FAToken = (secret, token) => {
 
 const enable2FA = async (staff_id, secret) => {
   try {
-    await supabase
+    const { error } = await supabase
       .from('staff')
       .update({
         two_factor_secret: secret,
         two_factor_enabled: true
       })
-      .eq('staff_id', staff_id);
+      .eq('id', staff_id); // Fixed: Use 'id' instead of 'staff_id'
+    
+    if (error) {
+      console.error('Error enabling 2FA:', error);
+      return false;
+    }
     
     return true;
   } catch (error) {
@@ -281,13 +286,18 @@ const enable2FA = async (staff_id, secret) => {
 
 const disable2FA = async (staff_id) => {
   try {
-    await supabase
+    const { error } = await supabase
       .from('staff')
       .update({
         two_factor_secret: null,
         two_factor_enabled: false
       })
-      .eq('staff_id', staff_id);
+      .eq('id', staff_id); // Fixed: Use 'id' instead of 'staff_id'
+    
+    if (error) {
+      console.error('Error disabling 2FA:', error);
+      return false;
+    }
     
     return true;
   } catch (error) {

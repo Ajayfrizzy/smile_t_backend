@@ -174,21 +174,48 @@ router.delete('/:id', (req, res, next) => { console.log(`[${new Date().toISOStri
   try {
     const { id } = req.params;
     
-    // Check if staff has related records (bar sales, bookings, etc.)
-    const { data: barSales, error: barSalesError } = await supabase
-      .from('bar_sales')
-      .select('id')
-      .eq('staff_id', id)
-      .limit(1);
+    // Get staff information to check role
+    const { data: staff, error: staffError } = await supabase
+      .from('staff')
+      .select('id, staff_id, name, role')
+      .eq('id', id)
+      .single();
     
-    const { data: bookings, error: bookingsError } = await supabase
+    if (staffError || !staff) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Staff member not found' 
+      });
+    }
+    
+    const role = staff.role.toLowerCase();
+    
+    // SuperAdmin cannot be deleted under any circumstances (system security)
+    if (role === 'superadmin') {
+      return res.status(403).json({
+        success: false,
+        message: 'SuperAdmin accounts cannot be deleted for security reasons.'
+      });
+    }
+    
+    // Check for related records (bookings and bar sales)
+    const { data: bookings } = await supabase
       .from('bookings')
       .select('id')
       .eq('created_by', id)
       .limit(1);
     
-    // If staff has related records, deactivate instead of deleting
-    if ((barSales && barSales.length > 0) || (bookings && bookings.length > 0)) {
+    const { data: barSales } = await supabase
+      .from('bar_sales')
+      .select('id')
+      .eq('staff_id', id)
+      .limit(1);
+    
+    const hasBookings = bookings && bookings.length > 0;
+    const hasBarSales = barSales && barSales.length > 0;
+    
+    // If staff has any related records, DEACTIVATE instead of delete
+    if (hasBookings || hasBarSales) {
       const { data, error } = await supabase
         .from('staff')
         .update({ is_active: false })
@@ -202,14 +229,20 @@ router.delete('/:id', (req, res, next) => { console.log(`[${new Date().toISOStri
         });
       }
       
+      // Build message based on what records exist
+      let recordType = [];
+      if (hasBookings) recordType.push('bookings');
+      if (hasBarSales) recordType.push('bar sales');
+      
       return res.json({
         success: true,
         data: data[0],
-        message: 'Staff member deactivated successfully (has related records)'
+        deactivated: true,
+        message: `${staff.name} has related ${recordType.join(' and ')} records. Account deactivated instead of deleted to preserve data integrity.`
       });
     }
     
-    // If no related records, safe to delete
+    // No related records found - safe to DELETE
     const { data, error } = await supabase
       .from('staff')
       .delete()
@@ -226,8 +259,10 @@ router.delete('/:id', (req, res, next) => { console.log(`[${new Date().toISOStri
     res.json({
       success: true,
       data: data[0],
-      message: 'Staff deleted successfully'
+      deleted: true,
+      message: `${staff.name} (${staff.role}) deleted successfully - no related records found.`
     });
+    
   } catch (error) {
     console.error('Delete staff error:', error);
     res.status(500).json({ 

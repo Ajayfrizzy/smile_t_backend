@@ -198,21 +198,29 @@ router.delete('/:id', (req, res, next) => { console.log(`[${new Date().toISOStri
       });
     }
     
-    // Check for related records (bookings and bar sales)
-    const { data: bookings } = await supabase
-      .from('bookings')
-      .select('id')
-      .eq('created_by', id)
-      .limit(1);
+    // Check for related records based on role
+    let hasBookings = false;
+    let hasBarSales = false;
     
-    const { data: barSales } = await supabase
-      .from('bar_sales')
-      .select('id')
-      .eq('staff_id', id)
-      .limit(1);
+    // For receptionists, check if they created any bookings (role-based)
+    if (role === 'receptionist') {
+      const { data: bookings } = await supabase
+        .from('bookings')
+        .select('id')
+        .eq('created_by_role', 'receptionist')
+        .limit(1);
+      hasBookings = bookings && bookings.length > 0;
+    }
     
-    const hasBookings = bookings && bookings.length > 0;
-    const hasBarSales = barSales && barSales.length > 0;
+    // For barmen, check if they created any bar sales (staff_id foreign key)
+    if (role === 'barmen') {
+      const { data: barSales } = await supabase
+        .from('bar_sales')
+        .select('id')
+        .eq('staff_id', id)
+        .limit(1);
+      hasBarSales = barSales && barSales.length > 0;
+    }
     
     // If staff has any related records, DEACTIVATE instead of delete
     if (hasBookings || hasBarSales) {

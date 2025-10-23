@@ -112,6 +112,36 @@ router.post('/', (req, res, next) => { console.log(`[${new Date().toISOString()}
       });
     }
 
+    // Check if staff_id already exists
+    const { data: existingStaffId, error: staffIdError } = await supabase
+      .from('staff')
+      .select('staff_id')
+      .eq('staff_id', staff_id)
+      .maybeSingle();
+    
+    if (existingStaffId) {
+      return res.status(409).json({
+        success: false,
+        message: `Staff ID "${staff_id}" already exists. Please use a different staff ID.`,
+        field: 'staff_id'
+      });
+    }
+
+    // Check if name already exists (case-insensitive)
+    const { data: existingName, error: nameError } = await supabase
+      .from('staff')
+      .select('name')
+      .ilike('name', name)
+      .maybeSingle();
+    
+    if (existingName) {
+      return res.status(409).json({
+        success: false,
+        message: `Staff member with name "${name}" already exists. Please use a different name.`,
+        field: 'name'
+      });
+    }
+
     // Hash the password before storing
     const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -120,9 +150,31 @@ router.post('/', (req, res, next) => { console.log(`[${new Date().toISOString()}
     ]).select();
     
     if (error) {
+      // Handle unique constraint violations from database
+      if (error.code === '23505') {
+        if (error.message.includes('staff_id')) {
+          return res.status(409).json({
+            success: false,
+            message: `Staff ID "${staff_id}" already exists. Please use a different staff ID.`,
+            field: 'staff_id'
+          });
+        }
+        if (error.message.includes('name')) {
+          return res.status(409).json({
+            success: false,
+            message: `Staff member with name "${name}" already exists. Please use a different name.`,
+            field: 'name'
+          });
+        }
+        return res.status(409).json({
+          success: false,
+          message: 'A staff member with this information already exists.'
+        });
+      }
+      
       return res.status(500).json({ 
         success: false, 
-        message: error.message 
+        message: 'Failed to create staff member. Please try again.' 
       });
     }
     
@@ -146,12 +198,69 @@ router.put('/:id', (req, res, next) => { console.log(`[${new Date().toISOString(
     const { id } = req.params;
     const updates = req.body;
     
+    // If updating staff_id, check if it's already taken by another staff member
+    if (updates.staff_id) {
+      const { data: existingStaffId } = await supabase
+        .from('staff')
+        .select('id, staff_id')
+        .eq('staff_id', updates.staff_id)
+        .maybeSingle();
+      
+      if (existingStaffId && existingStaffId.id !== parseInt(id)) {
+        return res.status(409).json({
+          success: false,
+          message: `Staff ID "${updates.staff_id}" is already in use by another staff member.`,
+          field: 'staff_id'
+        });
+      }
+    }
+    
+    // If updating name, check if it's already taken by another staff member
+    if (updates.name) {
+      const { data: existingName } = await supabase
+        .from('staff')
+        .select('id, name')
+        .ilike('name', updates.name)
+        .maybeSingle();
+      
+      if (existingName && existingName.id !== parseInt(id)) {
+        return res.status(409).json({
+          success: false,
+          message: `Staff member with name "${updates.name}" already exists.`,
+          field: 'name'
+        });
+      }
+    }
+    
+    // Hash password if it's being updated
+    if (updates.password) {
+      updates.password = await bcrypt.hash(updates.password, 10);
+    }
+    
     const { data, error } = await supabase.from('staff').update(updates).eq('id', id).select();
     
     if (error) {
+      // Handle unique constraint violations
+      if (error.code === '23505') {
+        if (error.message.includes('staff_id')) {
+          return res.status(409).json({
+            success: false,
+            message: `Staff ID "${updates.staff_id}" is already in use.`,
+            field: 'staff_id'
+          });
+        }
+        if (error.message.includes('name')) {
+          return res.status(409).json({
+            success: false,
+            message: `Staff member with name "${updates.name}" already exists.`,
+            field: 'name'
+          });
+        }
+      }
+      
       return res.status(500).json({ 
         success: false, 
-        message: error.message 
+        message: 'Failed to update staff member. Please try again.' 
       });
     }
     

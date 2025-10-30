@@ -24,7 +24,7 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'"],
       scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://checkout.flutterwave.com", "https://*.flutterwave.com", "https://*.f4b-flutterwave.com", "https://cdn.mxpnl.com", "data:"],
       imgSrc: ["'self'", "data:", "https:", "blob:"],
-      connectSrc: ["'self'", "https://*.flutterwave.com", "https://*.f4b-flutterwave.com", "https://api.fpjs.io", "https://metrics.flutterwave.com", "https://smile-t-backend.onrender.com", "wss:", "https://*.smile-tcontinental.com"],
+      connectSrc: ["'self'", "https://*.flutterwave.com", "https://*.f4b-flutterwave.com", "https://api.fpjs.io", "https://metrics.flutterwave.com", "https://smile-t-backend.onrender.com", "https://smiletbackend-production.up.railway.app", "wss:", "https://*.smile-tcontinental.com"],
       frameSrc: ["'self'", "https://*.flutterwave.com", "https://*.f4b-flutterwave.com", "https://checkout-v3-ui-prod.f4b-flutterwave.com"],
       objectSrc: ["'none'"],
       mediaSrc: ["'self'", "data:", "https:"],
@@ -44,7 +44,9 @@ const allowedOrigins = [
   'https://smile-tcontinental.com',
   'https://www.smile-tcontinental.com',
   'http://smile-tcontinental.com',
-  'http://www.smile-tcontinental.com'
+  'http://www.smile-tcontinental.com',
+  // Railway backend URL (for testing)
+  'https://smiletbackend-production.up.railway.app'
 ];
 
 app.use(cors({

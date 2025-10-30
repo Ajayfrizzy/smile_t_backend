@@ -59,13 +59,18 @@ async function initializeEmailTransporter() {
     });
     
     try {
-      // Verify with timeout (5 seconds) - quick check
-      await Promise.race([
-        gmailTransporter.verify(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Verification timeout')), 5000))
-      ]);
+      // Skip verification in production - it can timeout on Railway/Render
+      // but emails still work fine. Only verify in development.
+      if (process.env.NODE_ENV !== 'production') {
+        await Promise.race([
+          gmailTransporter.verify(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Verification timeout')), 5000))
+        ]);
+        console.log('✅ Gmail transporter verified');
+      } else {
+        console.log('✅ Gmail transporter configured (skipping verification in production)');
+      }
       
-      console.log('✅ Gmail transporter verified and ready to send emails');
       transporter = gmailTransporter;
       emailConfigured = true;
       activeEmailProvider = 'gmail';
@@ -104,13 +109,18 @@ async function initializeEmailTransporter() {
     });
     
     try {
-      // Verify with timeout (5 seconds)
-      await Promise.race([
-        zohoTransporter.verify(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Verification timeout')), 5000))
-      ]);
+      // Skip verification in production - it can timeout on Railway/Render
+      // but emails still work fine. Only verify in development.
+      if (process.env.NODE_ENV !== 'production') {
+        await Promise.race([
+          zohoTransporter.verify(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Verification timeout')), 5000))
+        ]);
+        console.log('✅ Zoho transporter verified');
+      } else {
+        console.log('✅ Zoho transporter configured (skipping verification in production)');
+      }
       
-      console.log('✅ Zoho transporter verified and ready to send emails');
       transporter = zohoTransporter;
       emailConfigured = true;
       activeEmailProvider = 'zoho';

@@ -9,6 +9,10 @@ require('dotenv').config();
 
 const app = express();
 
+// Trust proxy - CRITICAL for Railway, Render, Heroku, etc.
+// Railway uses a reverse proxy, so we need to trust the X-Forwarded-* headers
+app.set('trust proxy', 1);
+
 // Enable compression
 app.use(compression());
 
@@ -93,6 +97,14 @@ const limiter = rateLimit({
   message: {
     success: false,
     message: 'Too many requests from this IP, please try again later.'
+  },
+  // Railway/Render/Heroku specific: Use the rightmost IP in X-Forwarded-For
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  // Trust proxy is already set above, so this will work correctly
+  skip: (req) => {
+    // Skip rate limiting for health checks
+    return req.path === '/health';
   }
 });
 app.use(limiter);

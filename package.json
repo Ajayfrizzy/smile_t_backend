@@ -27,6 +27,7 @@
     "nodemailer": "^6.9.4",
     "pdfkit": "^0.13.0",
     "qrcode": "^1.5.3",
+    "resend": "^6.3.0",
     "speakeasy": "^2.0.0"
   },
   "devDependencies": {

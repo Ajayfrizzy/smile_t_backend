@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { createClient } = require('@supabase/supabase-js');
 const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const rateLimit = require('express-rate-limit');
 const { cacheMiddleware, invalidateCache } = require('../utils/cache');
 
@@ -21,7 +22,14 @@ const supabase = createClient(
 
 const { requireRole } = require('../middleware/auth');
 
-// Configure Email transporter (Gmail or Zoho)
+// Initialize Resend (preferred for Railway/cloud platforms - no SMTP port blocking)
+let resend = null;
+if (process.env.RESEND_API_KEY) {
+  resend = new Resend(process.env.RESEND_API_KEY);
+  console.log('✅ Resend email API configured (HTTP-based, no SMTP ports)');
+}
+
+// Configure Email transporter (Gmail or Zoho) - fallback for SMTP-friendly environments
 let transporter = null;
 let emailConfigured = false;
 let activeEmailProvider = 'none';
@@ -161,107 +169,116 @@ const limiter = rateLimit({
 });
 router.use(limiter);
 
-// Send booking confirmation email - with timeout protection
+// Send booking confirmation email - OPTIMIZED for Railway/cloud platforms
+// Tries Resend API first (no SMTP ports), falls back to SMTP if needed
 async function sendBookingConfirmationEmail(booking) {
-  // Skip if email not configured
-  if (!emailConfigured || !transporter) {
-    console.log('⚠️ Email transporter not configured - skipping booking confirmation email');
-    console.log('⚠️ Check server logs for email initialization errors');
-    console.log('⚠️ Ensure GMAIL_EMAIL and GMAIL_PASSWORD are set in environment variables');
-    return false;
-  }
-  
   // Validate booking data
   if (!booking || !booking.guest_email) {
     console.error('❌ Invalid booking data for email - missing guest_email');
-    console.error('❌ Booking data:', JSON.stringify(booking, null, 2));
     return false;
   }
   
-  console.log(`📧 Sending email via ${activeEmailProvider.toUpperCase()} to: ${booking.guest_email}`);
+  console.log(`📧 Preparing to send booking confirmation to: ${booking.guest_email}`);
   console.log(`📧 Booking ref: ${booking.transaction_ref}`);
-  console.log(`📧 Guest name: ${booking.guest_name}`);
-  console.log(`📧 Room: ${booking.room_name || 'Room'}`);
+  
+  // Email HTML template
+  const emailHtml = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <div style="background: linear-gradient(135deg, #7B3F00 0%, #A0522D 100%); color: white; padding: 30px; text-align: center;">
+        <h1 style="margin: 5px auto 10px;">Smile-T Continental Hotel</h1>
+        <p style="margin: 10px 0 0 0;">Booking Confirmation</p>
+      </div>
+      
+      <div style="padding: 30px; background: white; border: 1px solid #ddd;">
+        <h2 style="color: #7B3F00;">Your Booking is Confirmed!</h2>
+        
+        <div style="background: #f9f9f9; padding: 20px; border-radius: 8px; margin: 20px 0;">
+          <p><strong style="color: #7B3F00;">Booking Reference:</strong> ${booking.transaction_ref}</p>
+          <p><strong style="color: #7B3F00;">Guest Name:</strong> ${booking.guest_name}</p>
+          <p><strong style="color: #7B3F00;">Room:</strong> ${booking.room_name || 'Room'}</p>
+          <p><strong style="color: #7B3F00;">Check-in:</strong> ${new Date(booking.check_in).toLocaleDateString()}</p>
+          <p><strong style="color: #7B3F00;">Check-out:</strong> ${new Date(booking.check_out).toLocaleDateString()}</p>
+          <p><strong style="color: #7B3F00;">Total Amount:</strong> ₦${Number(booking.total_amount).toLocaleString()}</p>
+        </div>
+        
+        <div style="background: #fff3cd; border-left: 4px solid #FFD700; padding: 15px; margin: 20px 0;">
+          <p style="margin: 0;"><strong>📋 Important:</strong> Please present this email or your booking reference at reception during check-in.</p>
+        </div>
+        
+        <p style="text-align: center; margin-top: 30px;">
+          <strong>Contact us:</strong> +234-805-323-3660<br>
+          Email: info@smile-tcontinental.com
+        </p>
+      </div>
+      
+      <div style="background: #f5f5f5; padding: 20px; text-align: center; font-size: 12px; color: #666;">
+        <p>Thank you for choosing Smile-T Continental Hotel!</p>
+      </div>
+    </div>
+  `;
+  
+  // TRY METHOD 1: Resend API (preferred for Railway - no SMTP port blocking)
+  if (resend) {
+    try {
+      console.log('📧 Attempting to send via Resend API...');
+      
+      const { data, error } = await resend.emails.send({
+        from: 'Smile-T Continental <bookings@smile-tcontinental.com>',
+        to: [booking.guest_email],
+        subject: `✅ Booking Confirmation - ${booking.transaction_ref}`,
+        html: emailHtml
+      });
+      
+      if (error) {
+        console.error('❌ Resend API error:', error);
+        throw error;
+      }
+      
+      console.log('✅ Email sent successfully via Resend API');
+      console.log('✅ Resend email ID:', data?.id);
+      return true;
+    } catch (error) {
+      console.error('❌ Resend failed, trying SMTP fallback...', error.message);
+      // Continue to SMTP fallback
+    }
+  }
+  
+  // TRY METHOD 2: SMTP fallback (Gmail/Zoho) - may be blocked on Railway
+  if (!emailConfigured || !transporter) {
+    console.log('⚠️ Email not configured - neither Resend nor SMTP available');
+    console.log('⚠️ Set RESEND_API_KEY (recommended) or GMAIL_EMAIL/ZOHO_EMAIL');
+    return false;
+  }
   
   try {
+    console.log(`� Sending via SMTP (${activeEmailProvider})...`);
+    
     const mailOptions = {
       from: `Smile-T Continental Hotel <${process.env.GMAIL_EMAIL || process.env.ZOHO_EMAIL}>`,
       to: booking.guest_email,
       subject: `✅ Booking Confirmation - ${booking.transaction_ref}`,
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <div style="background: linear-gradient(135deg, #7B3F00 0%, #A0522D 100%); color: white; padding: 30px; text-align: center;">
-            <h1 style="margin: 5px auto 10px;">
-              Smile-T Continental Hotel
-            </h1>
-            <p style="margin: 10px 0 0 0;">Booking Confirmation</p>
-          </div>
-          
-          <div style="padding: 30px; background: white; border: 1px solid #ddd;">
-            <h2 style="color: #7B3F00;">Your Booking is Confirmed!</h2>
-            
-            <div style="background: #f9f9f9; padding: 20px; border-radius: 8px; margin: 20px 0;">
-              <p><strong style="color: #7B3F00;">Booking Reference:</strong> ${booking.transaction_ref}</p>
-              <p><strong style="color: #7B3F00;">Guest Name:</strong> ${booking.guest_name}</p>
-              <p><strong style="color: #7B3F00;">Room:</strong> ${booking.room_name || 'Room'}</p>
-              <p><strong style="color: #7B3F00;">Check-in:</strong> ${new Date(booking.check_in).toLocaleDateString()}</p>
-              <p><strong style="color: #7B3F00;">Check-out:</strong> ${new Date(booking.check_out).toLocaleDateString()}</p>
-              <p><strong style="color: #7B3F00;">Total Amount:</strong> ₦${Number(booking.total_amount).toLocaleString()}</p>
-            </div>
-            
-            <div style="background: #fff3cd; border-left: 4px solid #FFD700; padding: 15px; margin: 20px 0;">
-              <p style="margin: 0;"><strong>📋 Important:</strong> Please present this email or your booking reference at reception during check-in.</p>
-            </div>
-            
-            <p style="text-align: center; margin-top: 30px;">
-              <strong>Contact us:</strong> +234-805-323-3660<br>
-              Email: info@smile-tcontinental.com
-            </p>
-          </div>
-          
-          <div style="background: #f5f5f5; padding: 20px; text-align: center; font-size: 12px; color: #666;">
-            <p>Thank you for choosing Smile-T Continental Hotel!</p>
-          </div>
-        </div>
-      `
+      html: emailHtml
     };
     
-    // Send email with 20-second timeout (increased for production)
+    // Send with 30-second timeout
     await Promise.race([
       transporter.sendMail(mailOptions),
       new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Email timeout')), 20000)
+        setTimeout(() => reject(new Error('SMTP timeout - Railway likely blocking SMTP ports')), 30000)
       )
     ]);
     
-    console.log(`✅ Booking confirmation email sent successfully via ${activeEmailProvider.toUpperCase()}`);
-    console.log(`✅ Recipient: ${booking.guest_email}`);
-    console.log(`✅ Subject: ${mailOptions.subject}`);
+    console.log(`✅ Email sent via SMTP (${activeEmailProvider})`);
     return true;
   } catch (error) {
-    console.error(`❌ Error sending booking confirmation email via ${activeEmailProvider}:`, error.message);
-    console.error('❌ Full error:', error);
-    console.error('❌ Error code:', error.code);
-    console.error('❌ Error stack:', error.stack);
+    console.error(`❌ SMTP failed:`, error.message);
     
-    // Log specific error types with actionable advice
-    if (error.code === 'EAUTH') {
-      console.error('❌ EAUTH: Email authentication failed');
-      console.error('💡 Solution: Check that GMAIL_EMAIL and GMAIL_PASSWORD are correct');
-      console.error('💡 For Gmail: Use an App Password, not your regular password');
-      console.error('💡 Generate App Password at: https://myaccount.google.com/apppasswords');
-    } else if (error.code === 'ETIMEDOUT' || error.message === 'Email timeout') {
-      console.error('❌ TIMEOUT: Email send timeout - SMTP server slow or unreachable');
-      console.error('💡 Solution: Check network connectivity and SMTP server status');
-    } else if (error.code === 'ECONNREFUSED') {
-      console.error('❌ ECONNREFUSED: Email server connection refused');
-      console.error('💡 Solution: SMTP server may be down or blocked by firewall');
-    } else if (error.code === 'ESOCKET') {
-      console.error('❌ ESOCKET: Socket error - connection interrupted');
-      console.error('💡 Solution: Network issue or SMTP server disconnected');
+    if (error.message.includes('Railway likely blocking')) {
+      console.error('💡 SOLUTION: Railway blocks SMTP ports. Use Resend API instead!');
+      console.error('💡 Get free API key at: https://resend.com');
+      console.error('💡 Add RESEND_API_KEY to Railway environment variables');
     }
     
-    // Don't throw error - email failure shouldn't break the booking flow
     return false;
   }
 }

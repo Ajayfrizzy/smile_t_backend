@@ -28,7 +28,7 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'"],
       scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://checkout.flutterwave.com", "https://*.flutterwave.com", "https://*.f4b-flutterwave.com", "https://cdn.mxpnl.com", "data:"],
       imgSrc: ["'self'", "data:", "https:", "blob:"],
-      connectSrc: ["'self'", "https://*.flutterwave.com", "https://*.f4b-flutterwave.com", "https://api.fpjs.io", "https://metrics.flutterwave.com", "https://smile-t-backend.onrender.com", "https://smiletbackend-production.up.railway.app", "wss:", "https://*.smile-tcontinental.com"],
+      connectSrc: ["'self'", "https://*.flutterwave.com", "https://*.f4b-flutterwave.com", "https://api.fpjs.io", "https://metrics.flutterwave.com", "https://smile-t-tjej9.ondigitalocean.app", "wss:", "https://*.smile-tcontinental.com"],
       frameSrc: ["'self'", "https://*.flutterwave.com", "https://*.f4b-flutterwave.com", "https://checkout-v3-ui-prod.f4b-flutterwave.com"],
       objectSrc: ["'none'"],
       mediaSrc: ["'self'", "data:", "https:"],
@@ -49,8 +49,8 @@ const allowedOrigins = [
   'https://www.smile-tcontinental.com',
   'http://smile-tcontinental.com',
   'http://www.smile-tcontinental.com',
-  // Railway backend URL (for testing)
-  'https://smiletbackend-production.up.railway.app'
+  // Digital Ocean backend URL (for testing)
+  'https://smile-t-tjej9.ondigitalocean.app'
 ];
 
 app.use(cors({
@@ -98,7 +98,7 @@ const limiter = rateLimit({
     success: false,
     message: 'Too many requests from this IP, please try again later.'
   },
-  // Railway/Render/Heroku specific: Use the rightmost IP in X-Forwarded-For
+  // Railway/Render/Heroku/DigitalOcean specific: Use the rightmost IP in X-Forwarded-For
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
   // Trust proxy is already set above, so this will work correctly

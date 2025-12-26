@@ -26,9 +26,9 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://checkout.flutterwave.com", "https://*.flutterwave.com", "https://*.f4b-flutterwave.com", "https://cdn.mxpnl.com", "data:"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://checkout.flutterwave.com", "https://*.flutterwave.com", "https://*.f4b-flutterwave.com", "https://cdn.mxpnl.com", "https://vercel.live", "data:"],
       imgSrc: ["'self'", "data:", "https:", "blob:"],
-      connectSrc: ["'self'", "https://*.flutterwave.com", "https://*.f4b-flutterwave.com", "https://api.fpjs.io", "https://metrics.flutterwave.com", "https://smile-t-tjej9.ondigitalocean.app", "wss:", "https://*.smile-tcontinental.com"],
+      connectSrc: ["'self'", "https://*.flutterwave.com", "https://*.f4b-flutterwave.com", "https://api.fpjs.io", "https://metrics.flutterwave.com", "https://smile-t-tjej9.ondigitalocean.app", "https://vercel.live", "wss:", "https://*.smile-tcontinental.com"],
       frameSrc: ["'self'", "https://*.flutterwave.com", "https://*.f4b-flutterwave.com", "https://checkout-v3-ui-prod.f4b-flutterwave.com"],
       objectSrc: ["'none'"],
       mediaSrc: ["'self'", "data:", "https:"],
